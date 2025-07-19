@@ -99,9 +99,9 @@ from(bucket: "default")
 '''
 
 flux_old_price = '''
-from(bucket: "historical")
+from(bucket: "stocks_5m")
   |> range(start: -3d)
-  |> filter(fn: (r) => r._measurement == "pricing" and r._field == "Close")
+  |> filter(fn: (r) => r._measurement == "tick" and r._field == "Close")
   |> group(columns: ["ticker"])
   |> last()
 '''
