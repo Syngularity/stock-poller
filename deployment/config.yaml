@@ -7,7 +7,7 @@ data:
   DELTA_THRESHOLD: '8.0'
   INFLUX_BUCKET_HISTORICAL: historical
   INFLUX_BUCKET_STOCK: default
-  REDIS_HOST: host
+  REDIS_HOST: redis-master.redis.svc.cluster.local
   REDIS_PORT: 6379
   INFLUX_ORG: influxdata
   INFLUX_URL: https://influx.tekuro.io/
