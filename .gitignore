@@ -1,0 +1,57 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+ENV/
+
+# VS Code / IDE settings
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
+
+# Local environment variables and secrets
+.env
+*.env
+.env.*
+
+# Redis dump files (if ever dumped locally)
+dump.rdb
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# MacOS metadata
+.DS_Store
+
+# Kubernetes manifests (if generated dynamically)
+k8s/*.yaml
+
+# Python egg metadata
+*.egg-info/
+*.egg
+
+# Cache
+.cache/
+*.bak
+
+# Pickle or serialized files
+*.pkl
+*.pickle
+
+# Custom session/cache/temp files
+*.tmp
+*.swp
+
+# Pipenv
+Pipfile.lock
+
+# Docker
+*.tar
