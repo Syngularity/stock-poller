@@ -14,6 +14,8 @@ spec:
         app: stock-poller
     spec:
       containers:
+      - name: mav-container
+        image: artifacts.tekuro.io/stock-poller:latest
       - env:
         - name: INFLUX_URL
           valueFrom:
