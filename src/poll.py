@@ -7,6 +7,7 @@ import redis
 from datetime import datetime
 import pytz
 import os
+import time
 
 # Eastern for the STONK MARKETS
 eastern = pytz.timezone("US/Eastern")
@@ -99,66 +100,70 @@ from(bucket: "default")
   |> group(columns: ["ticker"])
   |> last()
 '''
-
-df_mav = fetch_and_format(flux_10mav, "10mav")
-df_last_vol = fetch_and_format(flux_last_volume, "volume")
-df_old_price = fetch_and_format(flux_old_price, "old_price")
-df_curr_price = fetch_and_format(flux_current_price, "current_price")
-df_float = fetch_and_format(flux_float, "float")
-
-# Join all the things
-try:   
-    df = df_mav.merge(df_last_vol, on="ticker") \
-                .merge(df_old_price, on="ticker") \
-                .merge(df_curr_price, on="ticker") \
-                .merge(df_float, on="ticker")
-    logger.info(f"Merged DataFrame with {len(df)} records.")
-except Exception:
-    logger.exception("Merge failed")
-    df = pd.DataFrame()
-
-# Calculate Delta
-df["delta"] = ((df["current_price"] - df["old_price"]) / df["old_price"])
-
-# Filter out incomplete or NaN data
-df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
-
-df["multiplier"] = df["volume"] / df["10mav"]
-
-
-r = redis.Redis(host=redis_host, port=redis_port, db=0)
-
-if not df.empty:
-    for _, row in df.iterrows():
+if __name__ == "__main__":
+    while True:
         try:
-            ticker = row["ticker"]
-            date_str = pd.to_datetime(now).date().isoformat()
-            key = f"scanner:{date_str}:{ticker}"
-            latest_key = f"scanner:latest:{ticker}"
+            df_mav = fetch_and_format(flux_10mav, "10mav")
+            df_last_vol = fetch_and_format(flux_last_volume, "volume")
+            df_old_price = fetch_and_format(flux_old_price, "old_price")
+            df_curr_price = fetch_and_format(flux_current_price, "current_price")
+            df_float = fetch_and_format(flux_float, "float")
 
-            payload = {
-                "ticker": ticker,
-                "price": row["current_price"],
-                "prev_price": row["old_price"],
-                "volume": row["volume"],
-                "mav10": row["10mav"],
-                "float": row["float"],
-                "delta": row["delta"],
-                "multiplier": row["multiplier"],
-                "timestamp": now
-            }
+            # Join all the things
+            try:   
+                df = df_mav.merge(df_last_vol, on="ticker") \
+                            .merge(df_old_price, on="ticker") \
+                            .merge(df_curr_price, on="ticker") \
+                            .merge(df_float, on="ticker")
+                logger.info(f"Merged DataFrame with {len(df)} records.")
+            except Exception:
+                logger.exception("Merge failed")
+                df = pd.DataFrame()
 
-            r.set(key, json.dumps(payload))
-            r.set(latest_key, json.dumps(payload))
+            # Calculate Delta
+            df["delta"] = ((df["current_price"] - df["old_price"]) / df["old_price"])
 
-            # Alert trigger check
-            if payload["multiplier"] > MULTIPLIER_THRESHOLD and abs(payload["delta"]) > DELTA_THRESHOLD:
-                send_to_alerts_service(payload)
-                
-        except Exception as e:
-            logger.exception(
-                f"Failed processing ticker '{row.get('ticker', 'UNKNOWN')}': {type(e).__name__}: {str(e)}"
-            )
+            # Filter out incomplete or NaN data
+            df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
 
+            df["multiplier"] = df["volume"] / df["10mav"]
+
+
+            r = redis.Redis(host=redis_host, port=redis_port, db=0)
+
+            if not df.empty:
+                for _, row in df.iterrows():
+                    try:
+                        ticker = row["ticker"]
+                        date_str = pd.to_datetime(now).date().isoformat()
+                        key = f"scanner:{date_str}:{ticker}"
+                        latest_key = f"scanner:latest:{ticker}"
+
+                        payload = {
+                            "ticker": ticker,
+                            "price": row["current_price"],
+                            "prev_price": row["old_price"],
+                            "volume": row["volume"],
+                            "mav10": row["10mav"],
+                            "float": row["float"],
+                            "delta": row["delta"],
+                            "multiplier": row["multiplier"],
+                            "timestamp": now
+                        }
+
+                        r.set(key, json.dumps(payload))
+                        r.set(latest_key, json.dumps(payload))
+
+                        # Alert trigger check
+                        if payload["multiplier"] > MULTIPLIER_THRESHOLD and abs(payload["delta"]) > DELTA_THRESHOLD:
+                            send_to_alerts_service(payload)
+                            
+                    except Exception as e:
+                        logger.exception(
+                            f"Failed processing ticker '{row.get('ticker', 'UNKNOWN')}': {type(e).__name__}: {str(e)}"
+                        )
+        except Exception:
+            logger.exception("Polling iteration failed")
+        time.sleep(5) 
 
 
