@@ -14,43 +14,54 @@ spec:
         app: stock-poller
     spec:
       containers:
-      - name: mav-container
+      - name: poller-container
         image: artifacts.tekuro.io/stock-poller:latest
-      - env:
+        env:
         - name: INFLUX_URL
           valueFrom:
             configMapKeyRef:
-              key: INFLUX_URL
               name: stock-poller-config
+              key: INFLUX_URL
         - name: INFLUX_ORG
           valueFrom:
             configMapKeyRef:
-              key: INFLUX_ORG
               name: stock-poller-config
+              key: INFLUX_ORG
         - name: INFLUX_BUCKET_STOCK
           valueFrom:
             configMapKeyRef:
-              key: INFLUX_BUCKET_STOCK
               name: stock-poller-config
+              key: INFLUX_BUCKET_STOCK
         - name: INFLUX_BUCKET_HISTORICAL
           valueFrom:
             configMapKeyRef:
-              key: INFLUX_BUCKET_HISTORICAL
               name: stock-poller-config
+              key: INFLUX_BUCKET_HISTORICAL
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: stock-poller-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: stock-poller-config
+              key: REDIS_PORT
         - name: MULTIPLIER_THRESHOLD
           valueFrom:
             configMapKeyRef:
-              key: MULTIPLIER_THRESHOLD
               name: stock-poller-config
+              key: MULTIPLIER_THRESHOLD
         - name: DELTA_THRESHOLD
           valueFrom:
             configMapKeyRef:
-              key: DELTA_THRESHOLD
               name: stock-poller-config
+              key: DELTA_THRESHOLD
         - name: INFLUX_TOKEN
           valueFrom:
             secretKeyRef:
-              key: INFLUX_TOKEN
               name: stock-poller-secrets
-        image: your-docker-repo/stock-poller:latest
-        name: stock-poller
+              key: INFLUX_TOKEN
+      restartPolicy: Always
+      imagePullSecrets:
+        - name: regcred

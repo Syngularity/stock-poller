@@ -4,10 +4,12 @@ import pandas as pd
 import json
 import logging
 import redis
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import os
 import time
+from influxdb_client.client.exceptions import InfluxDBError
+
 
 # Eastern for the STONK MARKETS
 eastern = pytz.timezone("US/Eastern")
@@ -32,14 +34,31 @@ DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 
 client = InfluxDBClient(url=url, token=token, org=org)
 
-pd.set_option("display.max_rows", None)
-pd.set_option("display.max_columns", None)
-pd.set_option("display.width", 0)  # auto-detect width
-pd.set_option("display.max_colwidth", None)
+try:
+    # Try a cheap query to validate connection
+    health = client.ping()
+    if not health:
+        logger.error("InfluxDB ping failed — server not reachable.")
+        raise ConnectionError("InfluxDB is not responding to ping.")
+    logger.info("✅ Connected to InfluxDB.")
+except InfluxDBError as e:
+    logger.exception(f"InfluxDB client error: {type(e).__name__} - {e}")
+    raise
+except Exception as e:
+    logger.exception(f"Unhandled error checking InfluxDB connection: {type(e).__name__} - {e}")
+    raise
+
 
 q = client.query_api()
 
+# Calculate seconds left till midnight eastern
+def seconds_until_midnight():
+    eastern = pytz.timezone("US/Eastern")
+    now = datetime.now(eastern)
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return int((midnight - now).total_seconds())
 
+# Grab influx data and format to DF
 def fetch_and_format(flux_query, value_name):
     try:
         result = q.query(org=org, query=flux_query)
@@ -58,6 +77,10 @@ def fetch_and_format(flux_query, value_name):
 # Alert Service Stub
 def send_to_alerts_service(ticker_data):
     print(f"[ALERT] {ticker_data['ticker']} triggered alert: Delta={ticker_data['delta']:.2f}%, Multiplier={ticker_data['multiplier']:.2f}")
+
+###################################
+#   All the Queries
+###################################
 
 flux_10mav = '''
 from(bucket: "default")
@@ -100,22 +123,40 @@ from(bucket: "default")
   |> group(columns: ["ticker"])
   |> last()
 '''
+
+
 if __name__ == "__main__":
     while True:
         try:
-            df_mav = fetch_and_format(flux_10mav, "10mav")
-            df_last_vol = fetch_and_format(flux_last_volume, "volume")
-            df_old_price = fetch_and_format(flux_old_price, "old_price")
-            df_curr_price = fetch_and_format(flux_current_price, "current_price")
-            df_float = fetch_and_format(flux_float, "float")
 
-            # Join all the things
             try:   
+                df_mav = fetch_and_format(flux_10mav, "10mav")
+                df_last_vol = fetch_and_format(flux_last_volume, "volume")
+                df_old_price = fetch_and_format(flux_old_price, "old_price")
+                df_curr_price = fetch_and_format(flux_current_price, "current_price")
+                df_float = fetch_and_format(flux_float, "float")
+
+                required_dfs = {
+                    "df_mav": df_mav,
+                    "df_last_vol": df_last_vol,
+                    "df_old_price": df_old_price,
+                    "df_curr_price": df_curr_price,
+                    "df_float": df_float,
+                }
+
+                empty_dfs = [name for name, df in required_dfs.items() if df.empty]
+                if empty_dfs:
+                    logger.error(f"❌  One or more required DataFrames are empty: {', '.join(empty_dfs)}. Retrying in 30s.")
+                    time.sleep(30)
+                    continue
+
                 df = df_mav.merge(df_last_vol, on="ticker") \
                             .merge(df_old_price, on="ticker") \
                             .merge(df_curr_price, on="ticker") \
                             .merge(df_float, on="ticker")
+                
                 logger.info(f"Merged DataFrame with {len(df)} records.")
+
             except Exception:
                 logger.exception("Merge failed")
                 df = pd.DataFrame()
@@ -151,8 +192,12 @@ if __name__ == "__main__":
                             "timestamp": now
                         }
 
+                        # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
+                        ttl_seconds = seconds_until_midnight() + 600
+                        r.set(latest_key, json.dumps(payload), ex=ttl_seconds)
+
+                        # Duplicate historical records so we can do some fast charting or whatever with it
                         r.set(key, json.dumps(payload))
-                        r.set(latest_key, json.dumps(payload))
 
                         # Alert trigger check
                         if payload["multiplier"] > MULTIPLIER_THRESHOLD and abs(payload["delta"]) > DELTA_THRESHOLD:
