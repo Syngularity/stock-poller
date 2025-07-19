@@ -1,8 +1,11 @@
 import redis
 import json
+import os
 
 # Connect to Redis
-r = redis.Redis(host='localhost', port=6379, db=0)
+redis_host = os.getenv("REDIS_HOST")
+redis_port = os.getenv("REDIS_PORT")
+r = redis.Redis(host=redis_host, port=redis_port, db=0)
 
 # Fetch all keys for today's snapshot
 keys = r.keys("scanner:*")
