@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stock-poller
+  namespace: stock
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stock-poller
+  template:
+    metadata:
+      labels:
+        app: stock-poller
+    spec:
+      containers:
+      - env:
+        - name: INFLUX_URL
+          valueFrom:
+            configMapKeyRef:
+              key: INFLUX_URL
+              name: stock-poller-config
+        - name: INFLUX_ORG
+          valueFrom:
+            configMapKeyRef:
+              key: INFLUX_ORG
+              name: stock-poller-config
+        - name: INFLUX_BUCKET_STOCK
+          valueFrom:
+            configMapKeyRef:
+              key: INFLUX_BUCKET_STOCK
+              name: stock-poller-config
+        - name: INFLUX_BUCKET_HISTORICAL
+          valueFrom:
+            configMapKeyRef:
+              key: INFLUX_BUCKET_HISTORICAL
+              name: stock-poller-config
+        - name: MULTIPLIER_THRESHOLD
+          valueFrom:
+            configMapKeyRef:
+              key: MULTIPLIER_THRESHOLD
+              name: stock-poller-config
+        - name: DELTA_THRESHOLD
+          valueFrom:
+            configMapKeyRef:
+              key: DELTA_THRESHOLD
+              name: stock-poller-config
+        - name: INFLUX_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: INFLUX_TOKEN
+              name: stock-poller-secrets
+        image: your-docker-repo/stock-poller:latest
+        name: stock-poller
