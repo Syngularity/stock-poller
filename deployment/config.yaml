@@ -11,5 +11,5 @@ data:
   ALERT_HOST: "alert-deployment.stock.svc.cluster.local:5000/send_momentum_alert"
   REDIS_PORT: "6379"
   INFLUX_ORG: "influxdata"
-  INFLUX_URL: "https://influx.tekuro.io/"
+  INFLUX_URL: "http://influx-influxdb2.influx.svc.cluster.local"
   MULTIPLIER_THRESHOLD: '4.5'
