@@ -5,11 +5,14 @@ metadata:
   namespace: stock
 spec:
   replicas: 1
+  revisionHistoryLimit: 1
   selector:
     matchLabels:
       app: stock-poller
   template:
     metadata:
+      annotations:
+        git-tag: TAG
       labels:
         app: stock-poller
     spec:
