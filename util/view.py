@@ -5,7 +5,8 @@ import os
 # Connect to Redis
 redis_host = os.getenv("REDIS_HOST")
 redis_port = os.getenv("REDIS_PORT")
-r = redis.Redis(host=redis_host, port=redis_port, db=0)
+redis_password = os.getenv("REDIS_PASSWORD")
+r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password)
 
 # Fetch all keys for today's snapshot
 keys = r.keys("scanner:*")

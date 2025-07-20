@@ -37,6 +37,11 @@ spec:
             configMapKeyRef:
               name: stock-poller-config
               key: INFLUX_BUCKET_HISTORICAL
+        - name: ALERT_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: stock-poller-config
+              key: ALERT_HOST
         - name: REDIS_HOST
           valueFrom:
             configMapKeyRef:
@@ -62,6 +67,12 @@ spec:
             secretKeyRef:
               name: stock-poller-secrets
               key: INFLUX_TOKEN
+
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis
+              key: redis-password
       restartPolicy: Always
       imagePullSecrets:
         - name: regcred

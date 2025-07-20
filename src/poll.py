@@ -7,6 +7,7 @@ import redis
 from datetime import datetime, timedelta
 import pytz
 import os
+import requests
 import time
 from influxdb_client.client.exceptions import InfluxDBError
 
@@ -22,10 +23,12 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+alert_url = os.getenv("ALERT_URL")
 url = os.getenv("INFLUX_URL")
 token = os.getenv("INFLUX_TOKEN")
 redis_host = os.getenv("REDIS_HOST")
 redis_port = os.getenv("REDIS_PORT")
+redis_password = os.getenv("REDIS_PASSWORD")
 org = os.getenv("INFLUX_ORG")
 bucket_stock = os.getenv("INFLUX_BUCKET_STOCK")
 bucket_historical = os.getenv("INFLUX_BUCKET_HISTORICAL")
@@ -76,7 +79,41 @@ def fetch_and_format(flux_query, value_name):
 
 # Alert Service Stub
 def send_to_alerts_service(ticker_data):
-    print(f"[ALERT] {ticker_data['ticker']} triggered alert: Delta={ticker_data['delta']:.2f}%, Multiplier={ticker_data['multiplier']:.2f}")
+
+    payload = {
+   
+        "ticker": ticker_data['ticker'],
+        "price": ticker_data['price'],
+        "multiplier": ticker_data['multiplier'],
+        "float_value": ticker_data['float'],
+        "volume": ticker_data['volume'],
+    }
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    print(f"Sending payload to {url}:")
+    print(json.dumps(payload, indent=2))
+
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+
+        print("\n--- Response ---")
+        print(f"Status Code: {response.status_code}")
+        print(f"Response Body: {response.json()}")
+
+        if response.status_code == 200:
+            print("\nPayload sent successfully! Check your Discord channel.")
+        else:
+            print(f"\nFailed to send payload. Server responded with an error.")
+
+    except requests.exceptions.ConnectionError:
+        print(f"\nError: Could not connect to Flask server at {url}.")
+        print("Please ensure your Flask app is running on http://127.0.0.1:5001.")
+    except Exception as e:
+        print(f"\nAn unexpected error occurred: {e}")
+
 
 ###################################
 #   All the Queries
@@ -170,7 +207,7 @@ if __name__ == "__main__":
             df["multiplier"] = df["volume"] / df["10mav"]
 
 
-            r = redis.Redis(host=redis_host, port=redis_port, db=0)
+            r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password)
 
             if not df.empty:
                 for _, row in df.iterrows():
@@ -200,7 +237,8 @@ if __name__ == "__main__":
                         r.set(key, json.dumps(payload))
 
                         # Alert trigger check
-                        if payload["multiplier"] > MULTIPLIER_THRESHOLD and abs(payload["delta"]) > DELTA_THRESHOLD:
+                        ticker_already_alerted_today = r.exists(latest_key) 
+                        if payload["multiplier"] > MULTIPLIER_THRESHOLD and abs(payload["delta"]) > DELTA_THRESHOLD and not ticker_already_alerted_today:
                             send_to_alerts_service(payload)
                             
                     except Exception as e:
