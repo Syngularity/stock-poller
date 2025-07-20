@@ -10,6 +10,7 @@ import os
 import requests
 import time
 from influxdb_client.client.exceptions import InfluxDBError
+from prometheus_client import start_http_server, Summary
 
 
 # Eastern for the STONK MARKETS
@@ -20,6 +21,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -161,92 +163,92 @@ from(bucket: "default")
   |> last()
 '''
 
+POLL_DURATION = Summary('poll_duration_seconds', 'Poll duration in seconds')
 
 if __name__ == "__main__":
+    start_http_server(8000)
     while True:
         try:
+            with POLL_DURATION.time():
+                try:
+                    df_mav = fetch_and_format(flux_10mav, "10mav")
+                    df_last_vol = fetch_and_format(flux_last_volume, "volume")
+                    df_old_price = fetch_and_format(flux_old_price, "old_price")
+                    df_curr_price = fetch_and_format(flux_current_price, "current_price")
+                    df_float = fetch_and_format(flux_float, "float")
 
-            try:   
-                df_mav = fetch_and_format(flux_10mav, "10mav")
-                df_last_vol = fetch_and_format(flux_last_volume, "volume")
-                df_old_price = fetch_and_format(flux_old_price, "old_price")
-                df_curr_price = fetch_and_format(flux_current_price, "current_price")
-                df_float = fetch_and_format(flux_float, "float")
+                    required_dfs = {
+                        "df_mav": df_mav,
+                        "df_last_vol": df_last_vol,
+                        "df_old_price": df_old_price,
+                        "df_curr_price": df_curr_price,
+                        "df_float": df_float,
+                    }
 
-                required_dfs = {
-                    "df_mav": df_mav,
-                    "df_last_vol": df_last_vol,
-                    "df_old_price": df_old_price,
-                    "df_curr_price": df_curr_price,
-                    "df_float": df_float,
-                }
+                    empty_dfs = [name for name, df in required_dfs.items() if df.empty]
+                    if empty_dfs:
+                        logger.error(f"❌  One or more required DataFrames are empty: {', '.join(empty_dfs)}. Retrying in 30s.")
+                        time.sleep(30)
+                        continue
 
-                empty_dfs = [name for name, df in required_dfs.items() if df.empty]
-                if empty_dfs:
-                    logger.error(f"❌  One or more required DataFrames are empty: {', '.join(empty_dfs)}. Retrying in 30s.")
-                    time.sleep(30)
-                    continue
+                    df = df_mav.merge(df_last_vol, on="ticker") \
+                                .merge(df_old_price, on="ticker") \
+                                .merge(df_curr_price, on="ticker") \
+                                .merge(df_float, on="ticker")
+                    
+                    logger.info(f"Merged DataFrame with {len(df)} records.")
 
-                df = df_mav.merge(df_last_vol, on="ticker") \
-                            .merge(df_old_price, on="ticker") \
-                            .merge(df_curr_price, on="ticker") \
-                            .merge(df_float, on="ticker")
-                
-                logger.info(f"Merged DataFrame with {len(df)} records.")
+                except Exception:
+                    logger.exception("Merge failed")
+                    df = pd.DataFrame()
 
-            except Exception:
-                logger.exception("Merge failed")
-                df = pd.DataFrame()
+                # Calculate Delta
+                df["delta"] = ((df["current_price"] - df["old_price"]) / df["old_price"])
 
-            # Calculate Delta
-            df["delta"] = ((df["current_price"] - df["old_price"]) / df["old_price"])
+                # Filter out incomplete or NaN data
+                df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
 
-            # Filter out incomplete or NaN data
-            df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
+                df["multiplier"] = df["volume"] / df["10mav"]
 
-            df["multiplier"] = df["volume"] / df["10mav"]
+                r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password)
 
+                if not df.empty:
+                    for _, row in df.iterrows():
+                        try:
+                            ticker = row["ticker"]
+                            date_str = pd.to_datetime(now).date().isoformat()
+                            key = f"scanner:{date_str}:{ticker}"
+                            latest_key = f"scanner:latest:{ticker}"
 
-            r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password)
+                            payload = {
+                                "ticker": ticker,
+                                "price": row["current_price"],
+                                "prev_price": row["old_price"],
+                                "volume": row["volume"],
+                                "mav10": row["10mav"],
+                                "float": row["float"],
+                                "delta": row["delta"],
+                                "multiplier": row["multiplier"],
+                                "timestamp": now
+                            }
 
-            if not df.empty:
-                for _, row in df.iterrows():
-                    try:
-                        ticker = row["ticker"]
-                        date_str = pd.to_datetime(now).date().isoformat()
-                        key = f"scanner:{date_str}:{ticker}"
-                        latest_key = f"scanner:latest:{ticker}"
+                            # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
+                            ttl_seconds = seconds_until_midnight() + 600
+                            r.set(latest_key, json.dumps(payload), ex=ttl_seconds)
 
-                        payload = {
-                            "ticker": ticker,
-                            "price": row["current_price"],
-                            "prev_price": row["old_price"],
-                            "volume": row["volume"],
-                            "mav10": row["10mav"],
-                            "float": row["float"],
-                            "delta": row["delta"],
-                            "multiplier": row["multiplier"],
-                            "timestamp": now
-                        }
+                            # Duplicate historical records so we can do some fast charting or whatever with it
+                            r.set(key, json.dumps(payload))
 
-                        # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
-                        ttl_seconds = seconds_until_midnight() + 600
-                        r.set(latest_key, json.dumps(payload), ex=ttl_seconds)
-
-                        # Duplicate historical records so we can do some fast charting or whatever with it
-                        r.set(key, json.dumps(payload))
-
-                        # Alert trigger check
-                        ticker_already_alerted_today = r.exists(latest_key) 
-                        if payload["multiplier"] > MULTIPLIER_THRESHOLD and abs(payload["delta"]) > DELTA_THRESHOLD and not ticker_already_alerted_today:
-                            send_to_alerts_service(payload)
-                            
-                    except Exception as e:
-                        logger.exception(
-                            f"Failed processing ticker '{row.get('ticker', 'UNKNOWN')}': {type(e).__name__}: {str(e)}"
-                        )
+                            # Alert trigger check
+                            ticker_already_alerted_today = r.exists(latest_key) 
+                            if payload["multiplier"] > MULTIPLIER_THRESHOLD and abs(payload["delta"]) > DELTA_THRESHOLD and not ticker_already_alerted_today:
+                                send_to_alerts_service(payload)
+                        except Exception as e:
+                            logger.exception(
+                                f"Failed processing ticker '{row.get('ticker', 'UNKNOWN')}': {type(e).__name__}: {str(e)}"
+                            )
         except Exception:
             logger.exception("Polling iteration failed")
-        time.sleep(5) 
+        time.sleep(5)
 
 
