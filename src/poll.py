@@ -71,7 +71,8 @@ def fetch_and_format(flux_query, value_name):
         if isinstance(df, list):
             df = pd.concat(df, ignore_index=True)
 
-        logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. {len(df)} rows.")
+        logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. Rows: {len(df)}, Columns: {df.columns.tolist()}")
+        logger.debug(f"Sample data for {value_name}:\n{df.head().to_string()}")
         return df
     except Exception as e:
         logger.exception(f"Failed query for {value_name}")
