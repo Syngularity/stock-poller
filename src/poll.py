@@ -86,7 +86,7 @@ def fetch_and_format(flux_query, value_name):
             if isinstance(df, list):
                 df = pd.concat(df, ignore_index=True)
 
-            df.drop(columns=['table'], errors='ignore', inplace=True)
+            df = df[["ticker", value_name]]
 
             logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. Rows: {len(df)}, Columns: {df.columns.tolist()}")
             logger.debug(f"Sample data for {value_name}:\n{df.head().to_string()}")
@@ -143,8 +143,8 @@ from(bucket: "10_mav")
   |> group(columns: ["sym"])
   |> last()
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> rename(columns: {sym: "ticker"})
-  |> keep(columns: ["ticker", "10_day_moving_avg"])
+  |> rename(columns: {sym: "ticker", "10_day_moving_avg": "10mav"})
+  |> keep(columns: ["ticker", "10mav"])
 '''
 
 flux_last_volume = '''
