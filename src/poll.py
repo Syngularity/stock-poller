@@ -66,16 +66,20 @@ def seconds_until_midnight():
 # Grab influx data and format to DF
 def fetch_and_format(flux_query, value_name):
     try:
-        result = q.query(org=org, query=flux_query)
-        rows = []
-        for table in result:
-            for record in table.records:
-                rows.append({
-                    "ticker": record.values.get("ticker") or record.values.get("sym"),
-                    value_name: record.get_value()
-                })
-        logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. {len(rows)} rows.")
-        return pd.DataFrame(rows)
+        df = q.query_data_frame(org=org, query=flux_query)
+        
+        # If we have multiple df's merge them into one
+        if isinstance(df, list):
+            df = pd.concat(df, ignore_index=True)
+
+        # Rename field value column from influx
+        df = df.rename(columns={"_value": value_name})
+
+        # Set ticker column with sym if influx returned that for ticker
+        df["ticker"] = df["ticker"].fillna(df["sym"])
+
+        logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. {len(df)} rows.")
+        return df
     except Exception as e:
         logger.exception(f"Failed query for {value_name}")
         return pd.DataFrame()
