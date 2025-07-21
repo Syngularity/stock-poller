@@ -79,7 +79,7 @@ def seconds_until_midnight():
 
 # Grab influx data and format to DF
 def fetch_and_format(flux_query, value_name):
-    with INFLUX_QUERY_DURATION.labels(query=value_name).time()
+    with INFLUX_QUERY_DURATION.labels(query=value_name).time():
         try:
             df = q.query_data_frame(org=org, query=flux_query)
             # If we have multiple df's merge them into one
