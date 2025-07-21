@@ -54,14 +54,6 @@ MULTIPLIER_THRESHOLD = float(os.getenv("MULTIPLIER_THRESHOLD", 4.5))
 DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 
 blocking_client = InfluxDBClient(url=url, token=token, org=org)
-# TODO(alexm): is gzip better or worse?
-# lazy init, need to happen in a corountine
-async_query_api = None
-async def get_async_query_api():
-    global async_query_api
-    if async_query_api is None:
-        async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
-    return async_client.query_api()
 
 try:
     # Try a cheap query to validate connection
@@ -85,11 +77,10 @@ def seconds_until_midnight():
     return int((midnight - now).total_seconds())
 
 # Grab influx data and format to DF
-async def fetch_and_format(flux_query, value_name):
+async def fetch_and_format(flux_query, value_name, async_query_api):
     with INFLUX_QUERY_DURATION.labels(query=value_name).time():
         try:
-            query_api = await get_async_query_api()
-            df = await query_api.query_data_frame(org=org, query=flux_query)
+            df = await async_query_api.query_data_frame(org=org, query=flux_query)
             # If we have multiple df's merge them into one
             if isinstance(df, list):
                 df = pd.concat(df, ignore_index=True)
@@ -201,13 +192,17 @@ from(bucket: "default") |> range(start: -3d)
 '''
 
 async def run_influx_queries():
-    return await asyncio.gather(
-        fetch_and_format(flux_10mav, "10mav"),
-        fetch_and_format(flux_last_volume, "volume"),
-        fetch_and_format(flux_old_price, "old_price"),
-        fetch_and_format(flux_current_price, "current_price"),
-        fetch_and_format(flux_float, "float"),
+    async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
+    async_query_api = async_client.query_api()
+    results = await asyncio.gather(
+        fetch_and_format(flux_10mav, "10mav", async_query_api ),
+        fetch_and_format(flux_last_volume, "volume", async_query_api),
+        fetch_and_format(flux_old_price, "old_price", async_query_api),
+        fetch_and_format(flux_current_price, "current_price", async_query_api),
+        fetch_and_format(flux_float, "float", async_query_api),
     )
+    await async_client.close()
+    return results
 
 if __name__ == "__main__":
     start_http_server(8000)
