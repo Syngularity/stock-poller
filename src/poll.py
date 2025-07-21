@@ -86,6 +86,8 @@ def fetch_and_format(flux_query, value_name):
             if isinstance(df, list):
                 df = pd.concat(df, ignore_index=True)
 
+            df.drop(columns=['table'], errors='ignore', inplace=True)
+
             logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. Rows: {len(df)}, Columns: {df.columns.tolist()}")
             logger.debug(f"Sample data for {value_name}:\n{df.head().to_string()}")
             return df
@@ -140,8 +142,9 @@ from(bucket: "10_mav")
   |> filter(fn: (r) => r._measurement == "10mav" and r._field == "10_day_moving_avg")
   |> group(columns: ["sym"])
   |> last()
-  |> rename(columns: {sym: "ticker"})
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> rename(columns: {sym: "ticker"})
+  |> keep(columns: ["ticker", "10_day_moving_avg"])
 '''
 
 flux_last_volume = '''
@@ -150,8 +153,9 @@ from(bucket: "stocks_1s")
   |> filter(fn: (r) => r._measurement == "t" and r._field == "av")
   |> group(columns: ["sym"])
   |> last()
-  |> rename(columns: {sym: "ticker"})
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> rename(columns: {sym: "ticker", av: "volume"})
+  |> keep(columns: ["ticker", "volume"])
 '''
 
 flux_current_price = '''
@@ -161,8 +165,9 @@ from(bucket: "stocks_1s")
   |> group(columns: ["sym"])
   |> last()
   |> filter(fn: (r) => r._value >= 1.0 and r._value <= 20.0)
-  |> rename(columns: {sym: "ticker"})
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> rename(columns: {sym: "ticker", c: "current_price"})
+  |> keep(columns: ["ticker", "current_price"])
 '''
 
 flux_old_price = '''
@@ -173,6 +178,8 @@ from(bucket: "stocks_5m")
   |> last()
   |> rename(columns: {sym: "ticker"})
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> rename(columns: {sym: "ticker", c: "old_price"})
+  |> keep(columns: ["ticker", "old_price"])
 '''
 
 flux_float = '''
@@ -182,6 +189,8 @@ from(bucket: "default") |> range(start: -3d)
   |> group(columns: ["ticker"])
   |> last()
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> rename(columns: {shares: "float"})
+  |> keep(columns: ["ticker", "float"])
 '''
 
 if __name__ == "__main__":
@@ -197,11 +206,6 @@ if __name__ == "__main__":
                         df_old_price = fetch_and_format(flux_old_price, "old_price")
                         df_curr_price = fetch_and_format(flux_current_price, "current_price")
                         df_float = fetch_and_format(flux_float, "float")
-
-                        df_old_price.rename(columns={"c": "old_price"}, inplace=True)
-                        df_curr_price.rename(columns={"c": "current_price"}, inplace=True)
-                        df_last_vol.rename(columns={"av": "volume"}, inplace=True)
-                        df_float.rename(columns={"shares": "float"}, inplace=True)
 
                     required_dfs = {
                         "df_mav": df_mav,
