@@ -83,7 +83,6 @@ def fetch_and_format(flux_query, value_name):
 def send_to_alerts_service(ticker_data):
 
     payload = {
-   
         "ticker": ticker_data['ticker'],
         "price": ticker_data['price'],
         "multiplier": ticker_data['multiplier'],
@@ -130,27 +129,27 @@ from(bucket: "10_mav")
 '''
 
 flux_last_volume = '''
-from(bucket: "default")
+from(bucket: "stocks_1s")
   |> range(start: -24h)
-  |> filter(fn: (r) => r._measurement == "current_volume" and r._field == "volume")
-  |> group(columns: ["ticker"])
+  |> filter(fn: (r) => r._measurement == "t" and r._field == "av")
+  |> group(columns: ["sym"])
   |> last()
 '''
 
 flux_old_price = '''
 from(bucket: "stocks_5m")
   |> range(start: -3d)
-  |> filter(fn: (r) => r._measurement == "tick" and r._field == "Close")
-  |> group(columns: ["ticker"])
+  |> filter(fn: (r) => r._measurement == "t" and r._field == "c")
+  |> group(columns: ["sym"])
   |> last()
 '''
 
 flux_current_price = '''
-from(bucket: "default")
+from(bucket: "stocks_1s")
   |> range(start: -2d)
-  |> filter(fn: (r) => r._measurement == "current_price" and r._field == "price")
+  |> filter(fn: (r) => r._measurement == "t" and r._field == "c")
   |> filter(fn: (r) => r._value >= 1.0 and r._value <= 20.0)
-  |> group(columns: ["ticker"])
+  |> group(columns: ["sym"])
   |> last()
 '''
 
