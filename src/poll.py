@@ -240,7 +240,7 @@ if __name__ == "__main__":
                         for _, row in df.iterrows():
                             try:
                                 ticker = row["ticker"]
-                                logger.info(f"Adding ticker to redis: {ticker}")
+                                #logger.info(f"Adding ticker to redis: {ticker}")
                                 date_str = pd.to_datetime(now).date().isoformat()
                                 key = f"scanner:{date_str}:{ticker}"
                                 latest_key = f"scanner:latest:{ticker}"
