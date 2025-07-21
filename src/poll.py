@@ -74,7 +74,7 @@ def fetch_and_format(flux_query, value_name):
                     "ticker": record.values.get("sym"),
                     value_name: record.get_value()
                 })
-        logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. {rows} rows.")
+        logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. {len(rows)} rows.")
         return pd.DataFrame(rows)
     except Exception as e:
         logger.exception(f"Failed query for {value_name}")
