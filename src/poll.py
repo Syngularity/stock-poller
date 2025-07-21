@@ -71,7 +71,7 @@ def fetch_and_format(flux_query, value_name):
         for table in result:
             for record in table.records:
                 rows.append({
-                    "ticker": record.values.get("sym"),
+                    "ticker": record.values.get("ticker") or record.values.get("sym"),
                     value_name: record.get_value()
                 })
         logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. {len(rows)} rows.")
