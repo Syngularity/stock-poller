@@ -193,6 +193,15 @@ from(bucket: "default") |> range(start: -3d)
   |> keep(columns: ["ticker", "float"])
 '''
 
+async def run_influx_queries():
+    return await asyncio.gather(
+        fetch_and_format(flux_10mav, "10mav"),
+        fetch_and_format(flux_last_volume, "volume"),
+        fetch_and_format(flux_old_price, "old_price"),
+        fetch_and_format(flux_current_price, "current_price"),
+        fetch_and_format(flux_float, "float"),
+    )
+
 if __name__ == "__main__":
     start_http_server(8000)
     logger.info("Starting poller loop")
@@ -201,13 +210,7 @@ if __name__ == "__main__":
             with POLL_DURATION.time():
                 try:
                     with INFLUX_DURATION.time():
-                        df_mav, df_last_vol, df_old_price, df_curr_price, df_float = asyncio.run(asyncio.gather(
-                            fetch_and_format(flux_10mav, "10mav"),
-                            fetch_and_format(flux_last_volume, "volume"),
-                            fetch_and_format(flux_old_price, "old_price"),
-                            fetch_and_format(flux_current_price, "current_price"),
-                            fetch_and_format(flux_float, "float"),
-                        ))
+                        df_mav, df_last_vol, df_old_price, df_curr_price, df_float = asyncio.run(run_influx_queries())
 
                     required_dfs = {
                         "df_mav": df_mav,
