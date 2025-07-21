@@ -160,7 +160,19 @@ flux_float = ''' from(bucket: "default") |> range(start: -3d)
   |> last()
 '''
 
-POLL_DURATION = Summary('poll_duration_seconds', 'Poll duration in seconds')
+NAMESPACE = 'stock_poller'
+
+
+def make_summary(name, documentation):
+    return Summary(name, documentation, namespace=NAMESPACE)
+
+
+POLL_DURATION = make_summary('poll_duration_seconds', 'Poll duration in seconds')
+INFLUX_DURATION = make_summary('influx_duration_seconds', 'Influx duration in seconds')
+MERGE_DURATION = make_summary('merge_duration_seconds', 'Merge duration in seconds')
+DELT_MULT_DURATION = make_summary('delt_mult_duration_seconds', 'delt mult duration in seconds')
+REDIS_DURATION = make_summary('redis_duration_seconds', 'redis duration in seconds')
+ALERT_DURATION = make_summary('alert_duration_seconds', 'alert duration in seconds')
 
 if __name__ == "__main__":
     start_http_server(8000)
@@ -168,13 +180,14 @@ if __name__ == "__main__":
     while True:
         try:
             with POLL_DURATION.time():
+                logger.info("polling...")
                 try:
-                    logger.info("Fetching data!")
-                    df_mav = fetch_and_format(flux_10mav, "10mav")
-                    df_last_vol = fetch_and_format(flux_last_volume, "volume")
-                    df_old_price = fetch_and_format(flux_old_price, "old_price")
-                    df_curr_price = fetch_and_format(flux_current_price, "current_price")
-                    df_float = fetch_and_format(flux_float, "float")
+                    with INFLUX_DURATION.time():
+                        df_mav = fetch_and_format(flux_10mav, "10mav")
+                        df_last_vol = fetch_and_format(flux_last_volume, "volume")
+                        df_old_price = fetch_and_format(flux_old_price, "old_price")
+                        df_curr_price = fetch_and_format(flux_current_price, "current_price")
+                        df_float = fetch_and_format(flux_float, "float")
 
                     required_dfs = {
                         "df_mav": df_mav,
@@ -190,80 +203,64 @@ if __name__ == "__main__":
                         time.sleep(30)
                         continue
 
-                    logger.info("All required data frames present")
-                    logger.info(f"df_mav rows: {len(df_mav)}")
-                    logger.info(f"df_last_vol rows: {len(df_last_vol)}")
-                    logger.info(f"df_old_price rows: {len(df_old_price)}")
-                    logger.info(f"df_curr_price rows: {len(df_curr_price)}")
-                    logger.info(f"df_float rows: {len(df_float)}")
-                    logger.info(f"df_mav duplicates: {df_mav['ticker'].duplicated().sum()}")
-                    logger.info(f"df_last_vol duplicates: {df_last_vol['ticker'].duplicated().sum()}")
-                    logger.info(f"df_old_price duplicates: {df_old_price['ticker'].duplicated().sum()}")
-                    logger.info(f"df_curr_price duplicates: {df_curr_price['ticker'].duplicated().sum()}")
-                    logger.info(f"df_float duplicates: {df_float['ticker'].duplicated().sum()}")
-                    logger.info(f"df_mav unique tickers: {df_mav['ticker'].nunique()}")
-                    logger.info(f"df_last_vol unique tickers: {df_last_vol['ticker'].nunique()}")
-                    logger.info(f"df_old_price unique tickers: {df_old_price['ticker'].nunique()}")
-                    logger.info(f"df_curr_price unique tickers: {df_curr_price['ticker'].nunique()}")
-                    logger.info(f"df_float unique tickers: {df_float['ticker'].nunique()}")
-                    df = df_mav.merge(df_last_vol, on="ticker") \
-                        .merge(df_old_price, on="ticker") \
-                        .merge(df_curr_price, on="ticker") \
-                        .merge(df_float, on="ticker")
-                    logger.info(f"Merged DataFrame with {len(df)} records.")
+                    with MERGE_DURATION.time():
+                        df = df_mav.merge(df_last_vol, on="ticker") \
+                            .merge(df_old_price, on="ticker") \
+                            .merge(df_curr_price, on="ticker") \
+                            .merge(df_float, on="ticker")
 
                 except Exception:
                     logger.exception("Merge failed")
                     df = pd.DataFrame()
 
                 # Calculate Delta
-                logger.info("Calculating delta")
-                df["delta"] = ((df["current_price"] - df["old_price"]) / df["old_price"])
+                with DELT_MULT_DURATION.time():
+                    df["delta"] = ((df["current_price"] - df["old_price"]) / df["old_price"])
 
-                # Filter out incomplete or NaN data
-                logger.info("Filtering out na data")
-                df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
+                    # Filter out incomplete or NaN data
+                    df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
 
-                df["multiplier"] = df["volume"] / df["10mav"]
+                    df["multiplier"] = df["volume"] / df["10mav"]
 
-                logger.info("Writing to redis")
-                r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password)
+                with REDIS_DURATION.time():
+                    r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password)
 
-                if not df.empty:
-                    for _, row in df.iterrows():
-                        try:
-                            ticker = row["ticker"]
-                            date_str = pd.to_datetime(now).date().isoformat()
-                            key = f"scanner:{date_str}:{ticker}"
-                            latest_key = f"scanner:latest:{ticker}"
+                with ALERT_DURATION.time():
+                    if not df.empty:
+                        for _, row in df.iterrows():
+                            try:
+                                ticker = row["ticker"]
+                                date_str = pd.to_datetime(now).date().isoformat()
+                                key = f"scanner:{date_str}:{ticker}"
+                                latest_key = f"scanner:latest:{ticker}"
 
-                            payload = {
-                                "ticker": ticker,
-                                "price": row["current_price"],
-                                "prev_price": row["old_price"],
-                                "volume": row["volume"],
-                                "mav10": row["10mav"],
-                                "float": row["float"],
-                                "delta": row["delta"],
-                                "multiplier": row["multiplier"],
-                                "timestamp": now
-                            }
+                                payload = {
+                                    "ticker": ticker,
+                                    "price": row["current_price"],
+                                    "prev_price": row["old_price"],
+                                    "volume": row["volume"],
+                                    "mav10": row["10mav"],
+                                    "float": row["float"],
+                                    "delta": row["delta"],
+                                    "multiplier": row["multiplier"],
+                                    "timestamp": now
+                                }
 
-                            # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
-                            ttl_seconds = seconds_until_midnight() + 600
-                            r.set(latest_key, json.dumps(payload), ex=ttl_seconds)
+                                # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
+                                ttl_seconds = seconds_until_midnight() + 600
+                                r.set(latest_key, json.dumps(payload), ex=ttl_seconds)
 
-                            # Duplicate historical records so we can do some fast charting or whatever with it
-                            r.set(key, json.dumps(payload))
+                                # Duplicate historical records so we can do some fast charting or whatever with it
+                                r.set(key, json.dumps(payload))
 
-                            # Alert trigger check
-                            ticker_already_alerted_today = r.exists(latest_key) 
-                            if payload["multiplier"] > MULTIPLIER_THRESHOLD and abs(payload["delta"]) > DELTA_THRESHOLD and not ticker_already_alerted_today:
-                                send_to_alerts_service(payload)
-                        except Exception as e:
-                            logger.exception(
-                                f"Failed processing ticker '{row.get('ticker', 'UNKNOWN')}': {type(e).__name__}: {str(e)}"
-                            )
+                                # Alert trigger check
+                                ticker_already_alerted_today = r.exists(latest_key) 
+                                if payload["multiplier"] > MULTIPLIER_THRESHOLD and abs(payload["delta"]) > DELTA_THRESHOLD and not ticker_already_alerted_today:
+                                    send_to_alerts_service(payload)
+                            except Exception as e:
+                                logger.exception(
+                                    f"Failed processing ticker '{row.get('ticker', 'UNKNOWN')}': {type(e).__name__}: {str(e)}"
+                                )
         except Exception:
             logger.exception("Polling iteration failed")
         time.sleep(5)
