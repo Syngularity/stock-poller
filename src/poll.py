@@ -74,6 +74,7 @@ def fetch_and_format(flux_query, value_name):
                     "ticker": record.values.get("sym"),
                     value_name: record.get_value()
                 })
+        logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. {rows} rows.")
         return pd.DataFrame(rows)
     except Exception as e:
         logger.exception(f"Failed query for {value_name}")
@@ -217,7 +218,7 @@ if __name__ == "__main__":
                     df["delta"] = ((df["current_price"] - df["old_price"]) / df["old_price"])
 
                     # Filter out incomplete or NaN data
-                    df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
+                    # df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
 
                     df["multiplier"] = df["volume"] / df["10mav"]
 
