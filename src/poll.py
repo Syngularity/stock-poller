@@ -196,6 +196,16 @@ if __name__ == "__main__":
                     logger.info(f"df_old_price rows: {len(df_old_price)}")
                     logger.info(f"df_curr_price rows: {len(df_curr_price)}")
                     logger.info(f"df_float rows: {len(df_float)}")
+                    logger.info(f"df_mav duplicates: {df_mav['ticker'].duplicated().sum()}")
+                    logger.info(f"df_last_vol duplicates: {df_last_vol['ticker'].duplicated().sum()}")
+                    logger.info(f"df_old_price duplicates: {df_old_price['ticker'].duplicated().sum()}")
+                    logger.info(f"df_curr_price duplicates: {df_curr_price['ticker'].duplicated().sum()}")
+                    logger.info(f"df_float duplicates: {df_float['ticker'].duplicated().sum()}")
+                    logger.info(f"df_mav unique tickers: {df_mav['ticker'].nunique()}")
+                    logger.info(f"df_last_vol unique tickers: {df_last_vol['ticker'].nunique()}")
+                    logger.info(f"df_old_price unique tickers: {df_old_price['ticker'].nunique()}")
+                    logger.info(f"df_curr_price unique tickers: {df_curr_price['ticker'].nunique()}")
+                    logger.info(f"df_float unique tickers: {df_float['ticker'].nunique()}")
                     df = df_mav.merge(df_last_vol, on="ticker") \
                         .merge(df_old_price, on="ticker") \
                         .merge(df_curr_price, on="ticker") \
