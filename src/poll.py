@@ -22,8 +22,22 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
-
 logger = logging.getLogger(__name__)
+
+NAMESPACE = 'stock_poller'
+
+
+def make_summary(name, documentation, **kwargs):
+    return Summary(name, documentation, namespace=NAMESPACE, **kwargs)
+
+
+POLL_DURATION = make_summary('poll_duration_seconds', 'Poll duration in seconds')
+INFLUX_DURATION = make_summary('influx_duration_seconds', 'Influx duration in seconds')
+INFLUX_QUERY_DURATION = make_summary('influx_query_duration_seconds', 'Influx duration in seconds', labelnames=["query"])
+MERGE_DURATION = make_summary('merge_duration_seconds', 'Merge duration in seconds')
+DELT_MULT_DURATION = make_summary('delt_mult_duration_seconds', 'delt mult duration in seconds')
+REDIS_DURATION = make_summary('redis_duration_seconds', 'redis duration in seconds')
+ALERT_DURATION = make_summary('alert_duration_seconds', 'alert duration in seconds')
 
 alert_url = os.getenv("ALERT_URL")
 url = os.getenv("INFLUX_URL")
@@ -65,18 +79,19 @@ def seconds_until_midnight():
 
 # Grab influx data and format to DF
 def fetch_and_format(flux_query, value_name):
-    try:
-        df = q.query_data_frame(org=org, query=flux_query)
-        # If we have multiple df's merge them into one
-        if isinstance(df, list):
-            df = pd.concat(df, ignore_index=True)
+    with INFLUX_QUERY_DURATION.labels(query=value_name).time()
+        try:
+            df = q.query_data_frame(org=org, query=flux_query)
+            # If we have multiple df's merge them into one
+            if isinstance(df, list):
+                df = pd.concat(df, ignore_index=True)
 
-        logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. Rows: {len(df)}, Columns: {df.columns.tolist()}")
-        logger.debug(f"Sample data for {value_name}:\n{df.head().to_string()}")
-        return df
-    except Exception as e:
-        logger.exception(f"Failed query for {value_name}")
-        return pd.DataFrame()
+            logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. Rows: {len(df)}, Columns: {df.columns.tolist()}")
+            logger.debug(f"Sample data for {value_name}:\n{df.head().to_string()}")
+            return df
+        except Exception as e:
+            logger.exception(f"Failed query for {value_name}")
+            return pd.DataFrame()
 
 # Alert Service Stub
 def send_to_alerts_service(ticker_data):
@@ -169,20 +184,6 @@ from(bucket: "default") |> range(start: -3d)
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
 
-NAMESPACE = 'stock_poller'
-
-
-def make_summary(name, documentation):
-    return Summary(name, documentation, namespace=NAMESPACE)
-
-
-POLL_DURATION = make_summary('poll_duration_seconds', 'Poll duration in seconds')
-INFLUX_DURATION = make_summary('influx_duration_seconds', 'Influx duration in seconds')
-MERGE_DURATION = make_summary('merge_duration_seconds', 'Merge duration in seconds')
-DELT_MULT_DURATION = make_summary('delt_mult_duration_seconds', 'delt mult duration in seconds')
-REDIS_DURATION = make_summary('redis_duration_seconds', 'redis duration in seconds')
-ALERT_DURATION = make_summary('alert_duration_seconds', 'alert duration in seconds')
-
 if __name__ == "__main__":
     start_http_server(8000)
     logger.info("Starting poller loop")
@@ -196,6 +197,11 @@ if __name__ == "__main__":
                         df_old_price = fetch_and_format(flux_old_price, "old_price")
                         df_curr_price = fetch_and_format(flux_current_price, "current_price")
                         df_float = fetch_and_format(flux_float, "float")
+
+                        df_old_price.rename(columns={"c": "old_price"}, inplace=True)
+                        df_curr_price.rename(columns={"c": "current_price"}, inplace=True)
+                        df_last_vol.rename(columns={"av": "volume"}, inplace=True)
+                        df_float.rename(columns={"shares": "float"}, inplace=True)
 
                     required_dfs = {
                         "df_mav": df_mav,
