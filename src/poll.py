@@ -240,10 +240,11 @@ if __name__ == "__main__":
                         for _, row in df.iterrows():
                             try:
                                 ticker = row["ticker"]
-                                #logger.info(f"Adding ticker to redis: {ticker}")
+
                                 date_str = pd.to_datetime(now).date().isoformat()
                                 key = f"scanner:{date_str}:{ticker}"
                                 latest_key = f"scanner:latest:{ticker}"
+
 
                                 payload = {
                                     "ticker": ticker,
@@ -261,6 +262,19 @@ if __name__ == "__main__":
                                 ticker_already_alerted_today = r.exists(latest_key) 
                                 # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
                                 ttl_seconds = seconds_until_midnight() + 600
+
+
+                                # Check if historical key already exists
+                                first_seen = now
+                                if r.exists(key):
+                                    try:
+                                        existing = json.loads(r.get(key))
+                                        first_seen = existing.get("first_seen", now)
+                                    except Exception:
+                                        logger.warning(f"Couldn't parse existing Redis key for {ticker}, using current time.")
+
+                                payload["first_seen"] = first_seen
+                                
                                 r.set(latest_key, json.dumps(payload), ex=ttl_seconds)
 
                                 # Duplicate historical records so we can do some fast charting or whatever with it
