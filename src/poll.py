@@ -260,7 +260,7 @@ async def start_poll_loop():
         logger.exception(f"Unhandled error checking InfluxDB connection: {type(e).__name__} - {e}")
         raise
 
-    r: aioredis.Redis = await aioredis.from_url(host=redis_host, port=redis_port, db=0, password=redis_password)
+    r: aioredis.Redis = await aioredis.from_url(redis_host, port=redis_port, db=0, password=redis_password)
 
     while True:
         try:
