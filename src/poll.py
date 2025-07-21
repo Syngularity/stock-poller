@@ -55,7 +55,13 @@ DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 
 blocking_client = InfluxDBClient(url=url, token=token, org=org)
 # TODO(alexm): is gzip better or worse?
-async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
+# lazy init, need to happen in a corountine
+async_client = None
+async def get_async_client():
+    global async_client
+    if async_client is None:
+        async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
+    return async_client
 
 try:
     # Try a cheap query to validate connection
@@ -71,9 +77,6 @@ except Exception as e:
     logger.exception(f"Unhandled error checking InfluxDB connection: {type(e).__name__} - {e}")
     raise
 
-
-q = async_client.query_api()
-
 # Calculate seconds left till midnight eastern
 def seconds_until_midnight():
     eastern = pytz.timezone("US/Eastern")
@@ -85,7 +88,8 @@ def seconds_until_midnight():
 async def fetch_and_format(flux_query, value_name):
     with INFLUX_QUERY_DURATION.labels(query=value_name).time():
         try:
-            df = await q.query_data_frame(org=org, query=flux_query)
+            client = await get_async_client()
+            df = await client.query_api.query_data_frame(org=org, query=flux_query)
             # If we have multiple df's merge them into one
             if isinstance(df, list):
                 df = pd.concat(df, ignore_index=True)
