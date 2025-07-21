@@ -67,13 +67,17 @@ def seconds_until_midnight():
 def fetch_and_format(flux_query, value_name):
     try:
         df = q.query_data_frame(org=org, query=flux_query)
-        
         # If we have multiple df's merge them into one
         if isinstance(df, list):
             df = pd.concat(df, ignore_index=True)
 
         # Rename field value column from influx
-        df = df.rename(columns={"_value": value_name})
+        if "ticker" in df.columns:
+            df["ticker"] = df["ticker"].fillna(df["sym"] if "sym" in df.columns else None)
+        elif "sym" in df.columns:
+            df["ticker"] = df["sym"]
+        else:
+            logger.warning("Neither 'ticker' nor 'sym' columns found in dataframe.")
 
         # Set ticker column with sym if influx returned that for ticker
         df["ticker"] = df["ticker"].fillna(df["sym"])
@@ -130,6 +134,7 @@ from(bucket: "10_mav")
   |> range(start: -7d)
   |> filter(fn: (r) => r._measurement == "10mav" and r._field == "10_day_moving_avg")
   |> group(columns: ["ticker"])
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
 
 flux_last_volume = '''
@@ -138,6 +143,8 @@ from(bucket: "stocks_1s")
   |> filter(fn: (r) => r._measurement == "t" and r._field == "av")
   |> group(columns: ["sym"])
   |> last()
+  |> map(fn: (r) => ({ r with ticker: r.sym }))
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
 
 flux_old_price = '''
@@ -146,6 +153,8 @@ from(bucket: "stocks_5m")
   |> filter(fn: (r) => r._measurement == "t" and r._field == "c")
   |> group(columns: ["sym"])
   |> last()
+  |> map(fn: (r) => ({ r with ticker: r.sym }))
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
 
 flux_current_price = '''
@@ -155,6 +164,8 @@ from(bucket: "stocks_1s")
   |> filter(fn: (r) => r._value >= 1.0 and r._value <= 20.0)
   |> group(columns: ["sym"])
   |> last()
+  |> map(fn: (r) => ({ r with ticker: r.sym }))
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
 
 flux_float = ''' from(bucket: "default") |> range(start: -3d)
@@ -162,6 +173,7 @@ flux_float = ''' from(bucket: "default") |> range(start: -3d)
   |> filter(fn: (r) => r._value <= 10000000)
   |> group(columns: ["ticker"])
   |> last()
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
 
 NAMESPACE = 'stock_poller'
