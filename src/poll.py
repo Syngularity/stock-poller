@@ -221,6 +221,7 @@ if __name__ == "__main__":
                     # df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
 
                     df["multiplier"] = df["volume"] / df["10mav"]
+                    logger.info(f"✅ Merged DataFrame with {len(df)} rows after filtering.")
 
                 with REDIS_DURATION.time():
                     r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password)
