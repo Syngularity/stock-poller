@@ -203,6 +203,16 @@ if __name__ == "__main__":
                         time.sleep(30)
                         continue
 
+                    logger.info(f"10mav tickers: {df_mav['ticker'].nunique()}, Sample: {df_mav['ticker'].unique()[:5]}")
+                    logger.info(f"volume tickers: {df_last_vol['ticker'].nunique()}, Sample: {df_last_vol['ticker'].unique()[:5]}")
+                    logger.info(f"old_price tickers: {df_old_price['ticker'].nunique()}, Sample: {df_old_price['ticker'].unique()[:5]}")
+                    logger.info(f"current_price tickers: {df_curr_price['ticker'].nunique()}, Sample: {df_curr_price['ticker'].unique()[:5]}")
+                    logger.info(f"float tickers: {df_float['ticker'].nunique()}, Sample: {df_float['ticker'].unique()[:5]}")
+
+                    common_tickers = set(df_mav['ticker']) & set(df_last_vol['ticker']) & set(df_old_price['ticker']) & set(df_curr_price['ticker']) & set(df_float['ticker'])
+                    logger.info(f"🧪 Common tickers across all datasets: {len(common_tickers)}")
+
+
                     with MERGE_DURATION.time():
                         df = df_mav.merge(df_last_vol, on="ticker") \
                             .merge(df_old_price, on="ticker") \
