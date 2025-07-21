@@ -99,7 +99,7 @@ def send_to_alerts_service(ticker_data):
     print(json.dumps(payload, indent=2))
 
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(alert_url, headers=headers, json=payload)
 
         print("\n--- Response ---")
         print(f"Status Code: {response.status_code}")
