@@ -126,7 +126,6 @@ from(bucket: "10_mav")
   |> range(start: -7d)
   |> filter(fn: (r) => r._measurement == "10mav" and r._field == "10_day_moving_avg")
   |> group(columns: ["ticker"])
-  |> last()
 '''
 
 flux_last_volume = '''
