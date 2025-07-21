@@ -56,12 +56,12 @@ DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 blocking_client = InfluxDBClient(url=url, token=token, org=org)
 # TODO(alexm): is gzip better or worse?
 # lazy init, need to happen in a corountine
-async_client = None
-async def get_async_client():
-    global async_client
-    if async_client is None:
+async_query_api = None
+async def get_async_query_api():
+    global async_query_api
+    if async_query_api is None:
         async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
-    return async_client
+    return async_client.query_api()
 
 try:
     # Try a cheap query to validate connection
@@ -88,8 +88,8 @@ def seconds_until_midnight():
 async def fetch_and_format(flux_query, value_name):
     with INFLUX_QUERY_DURATION.labels(query=value_name).time():
         try:
-            client = await get_async_client()
-            df = await client.query_api.query_data_frame(org=org, query=flux_query)
+            query_api = await get_async_query_api()
+            df = await query_api.query_data_frame(org=org, query=flux_query)
             # If we have multiple df's merge them into one
             if isinstance(df, list):
                 df = pd.concat(df, ignore_index=True)
