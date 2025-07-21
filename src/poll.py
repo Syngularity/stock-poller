@@ -11,6 +11,7 @@ import requests
 import time
 from influxdb_client.client.exceptions import InfluxDBError
 from prometheus_client import start_http_server, Summary
+import asyncio
 
 
 # Eastern for the STONK MARKETS
@@ -78,7 +79,7 @@ def seconds_until_midnight():
     return int((midnight - now).total_seconds())
 
 # Grab influx data and format to DF
-def fetch_and_format(flux_query, value_name):
+async def fetch_and_format(flux_query, value_name):
     with INFLUX_QUERY_DURATION.labels(query=value_name).time():
         try:
             df = q.query_data_frame(org=org, query=flux_query)
@@ -200,11 +201,13 @@ if __name__ == "__main__":
             with POLL_DURATION.time():
                 try:
                     with INFLUX_DURATION.time():
-                        df_mav = fetch_and_format(flux_10mav, "10mav")
-                        df_last_vol = fetch_and_format(flux_last_volume, "volume")
-                        df_old_price = fetch_and_format(flux_old_price, "old_price")
-                        df_curr_price = fetch_and_format(flux_current_price, "current_price")
-                        df_float = fetch_and_format(flux_float, "float")
+                        df_mav, df_last_vol, df_old_price, df_curr_price, df_float = asyncio.run(asyncio.gather(
+                            fetch_and_format(flux_10mav, "10mav"),
+                            fetch_and_format(flux_last_volume, "volume"),
+                            fetch_and_format(flux_old_price, "old_price"),
+                            fetch_and_format(flux_current_price, "current_price"),
+                            fetch_and_format(flux_float, "float"),
+                        ))
 
                     required_dfs = {
                         "df_mav": df_mav,
