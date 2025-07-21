@@ -1,0 +1,6 @@
+influxdb-client==1.49.0
+pandas==2.2.3
+pytz==2025.2
+redis==6.2.0
+requests==2.32.3
+prometheus-client==0.22.1
