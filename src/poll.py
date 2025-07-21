@@ -273,7 +273,7 @@ async def start_poll_loop():
                     empty_dfs = [name for name, df in required_dfs.items() if df.empty]
                     if empty_dfs:
                         logger.error(f"❌  One or more required DataFrames are empty: {', '.join(empty_dfs)}. Retrying in 30s.")
-                        asyncio.sleep(30)
+                        await asyncio.sleep(30)
                         continue
 
                     if logger.isEnabledFor(logging.DEBUG):        
@@ -314,7 +314,7 @@ async def start_poll_loop():
                         await asyncio.gather(*tasks)
         except Exception:
             logger.exception("Polling iteration failed")
-        asyncio.sleep(5)
+        await asyncio.sleep(5)
 
 
 if __name__ == "__main__":
