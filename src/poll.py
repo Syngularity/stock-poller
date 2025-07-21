@@ -180,7 +180,6 @@ if __name__ == "__main__":
     while True:
         try:
             with POLL_DURATION.time():
-                logger.info("polling...")
                 try:
                     with INFLUX_DURATION.time():
                         df_mav = fetch_and_format(flux_10mav, "10mav")
@@ -255,7 +254,7 @@ if __name__ == "__main__":
 
                                 # Alert trigger check
                                 ticker_already_alerted_today = r.exists(latest_key) 
-                                if payload["multiplier"] > MULTIPLIER_THRESHOLD and abs(payload["delta"]) > DELTA_THRESHOLD and not ticker_already_alerted_today:
+                                if payload["multiplier"] > MULTIPLIER_THRESHOLD and not ticker_already_alerted_today:
                                     send_to_alerts_service(payload)
                             except Exception as e:
                                 logger.exception(
