@@ -1,4 +1,5 @@
-from influxdb_client import InfluxDBClient
+from influxdb_client.client.influxdb_client import InfluxDBClient
+from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
 from influxdb_client.client.write_api import SYNCHRONOUS
 import pandas as pd
 import json
@@ -52,11 +53,13 @@ bucket_historical = os.getenv("INFLUX_BUCKET_HISTORICAL")
 MULTIPLIER_THRESHOLD = float(os.getenv("MULTIPLIER_THRESHOLD", 4.5))
 DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 
-client = InfluxDBClient(url=url, token=token, org=org)
+blocking_client = InfluxDBClient(url=url, token=token, org=org)
+# TODO(alexm): is gzip better or worse?
+async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
 
 try:
     # Try a cheap query to validate connection
-    health = client.ping()
+    health = blocking_client.ping()
     if not health:
         logger.error("InfluxDB ping failed — server not reachable.")
         raise ConnectionError("InfluxDB is not responding to ping.")
@@ -69,7 +72,7 @@ except Exception as e:
     raise
 
 
-q = client.query_api()
+q = async_client.query_api()
 
 # Calculate seconds left till midnight eastern
 def seconds_until_midnight():
@@ -82,7 +85,7 @@ def seconds_until_midnight():
 async def fetch_and_format(flux_query, value_name):
     with INFLUX_QUERY_DURATION.labels(query=value_name).time():
         try:
-            df = q.query_data_frame(org=org, query=flux_query)
+            df = await q.query_data_frame(org=org, query=flux_query)
             # If we have multiple df's merge them into one
             if isinstance(df, list):
                 df = pd.concat(df, ignore_index=True)
