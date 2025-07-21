@@ -257,6 +257,8 @@ if __name__ == "__main__":
                                     "timestamp": now
                                 }
 
+                                # Alert trigger check
+                                ticker_already_alerted_today = r.exists(latest_key) 
                                 # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
                                 ttl_seconds = seconds_until_midnight() + 600
                                 r.set(latest_key, json.dumps(payload), ex=ttl_seconds)
@@ -264,8 +266,7 @@ if __name__ == "__main__":
                                 # Duplicate historical records so we can do some fast charting or whatever with it
                                 r.set(key, json.dumps(payload))
 
-                                # Alert trigger check
-                                ticker_already_alerted_today = r.exists(latest_key) 
+
                                 if payload["multiplier"] > MULTIPLIER_THRESHOLD and not ticker_already_alerted_today:
                                     logger.info(f"🚨 Alerting for ticker: {ticker} with multiplier {payload['multiplier']}")
                                     send_to_alerts_service(payload)
