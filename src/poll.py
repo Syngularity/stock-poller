@@ -153,9 +153,7 @@ from(bucket: "stocks_1s")
   |> last()
 '''
 
-flux_float = '''
-from(bucket: "default")
-  |> range(start: -3d)
+flux_float = ''' from(bucket: "default") |> range(start: -3d)
   |> filter(fn: (r) => r._measurement == "float" and r._field == "shares")
   |> filter(fn: (r) => r._value <= 10000000)
   |> group(columns: ["ticker"])
@@ -166,10 +164,12 @@ POLL_DURATION = Summary('poll_duration_seconds', 'Poll duration in seconds')
 
 if __name__ == "__main__":
     start_http_server(8000)
+    logger.info("Starting poller loop")
     while True:
         try:
             with POLL_DURATION.time():
                 try:
+                    logger.info("Fetching data!")
                     df_mav = fetch_and_format(flux_10mav, "10mav")
                     df_last_vol = fetch_and_format(flux_last_volume, "volume")
                     df_old_price = fetch_and_format(flux_old_price, "old_price")
@@ -190,6 +190,7 @@ if __name__ == "__main__":
                         time.sleep(30)
                         continue
 
+                    logger.info("All required data frames present")
                     df = df_mav.merge(df_last_vol, on="ticker") \
                                 .merge(df_old_price, on="ticker") \
                                 .merge(df_curr_price, on="ticker") \
@@ -202,13 +203,16 @@ if __name__ == "__main__":
                     df = pd.DataFrame()
 
                 # Calculate Delta
+                logger.info("Calculating delta")
                 df["delta"] = ((df["current_price"] - df["old_price"]) / df["old_price"])
 
                 # Filter out incomplete or NaN data
+                logger.info("Filtering out na data")
                 df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
 
                 df["multiplier"] = df["volume"] / df["10mav"]
 
+                logger.info("Writing to redis")
                 r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password)
 
                 if not df.empty:
