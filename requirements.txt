@@ -4,4 +4,4 @@ pandas==2.2.3
 pytz==2025.2
 requests==2.32.3
 prometheus-client==0.22.1
-aioredis[hiredis]==2.0.1
+redis[hiredis] == 6.2.0

@@ -8,7 +8,7 @@ import os
 import requests
 from influxdb_client.client.exceptions import InfluxDBError
 from prometheus_client import start_http_server, Summary
-import aioredis
+import redis.asyncio as redis
 import asyncio
 
 
@@ -184,7 +184,7 @@ async def run_influx_queries(async_query_api: QueryApiAsync):
         fetch_and_format(flux_float, "float", async_query_api),
     )
 
-async def process_ticker(r, row, now):
+async def process_ticker(r: redis.Redis, row, now):
     try:
         ticker = row["ticker"]
 
@@ -205,15 +205,9 @@ async def process_ticker(r, row, now):
             "timestamp": now
         }
 
-        # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
-        ttl_seconds = seconds_until_midnight() + 600
-
         with REDIS_DURATION.time():
-            # This batches requests to redis
-            async with r.pipeline() as pipe:
-                ticker_already_alerted_today = await r.exists(latest_key) 
-                key_from_redis = await r.get(key)
-                await pipe.execute()
+
+            ticker_already_alerted_today, key_from_redis = await asyncio.gather(r.exists(latest_key), r.get(key))
 
             # Check if historical key already exists
             first_seen = now
@@ -226,12 +220,11 @@ async def process_ticker(r, row, now):
 
             payload["first_seen"] = first_seen
 
-            # This batches requests to redis
-            async with r.pipeline() as pipe:
-                r.set(latest_key, json.dumps(payload), ex=ttl_seconds)
-                # Duplicate historical records so we can do some fast charting or whatever with it
-                r.set(key, json.dumps(payload))
-                await pipe.execute()
+            # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
+            ttl_seconds = seconds_until_midnight() + 600
+            await asyncio.gather(
+                r.set(latest_key, json.dumps(payload), ex=ttl_seconds), 
+                r.set(key, json.dumps(payload)))
 
 
         if payload["multiplier"] > MULTIPLIER_THRESHOLD and not ticker_already_alerted_today:
@@ -260,7 +253,7 @@ async def start_poll_loop():
         logger.exception(f"Unhandled error checking InfluxDB connection: {type(e).__name__} - {e}")
         raise
 
-    r: aioredis.Redis = await aioredis.from_url(redis_host, port=redis_port, db=0, password=redis_password)
+    r: redis.Redis = await redis.from_url(redis_host, port=redis_port, db=0, password=redis_password)
 
     while True:
         try:
