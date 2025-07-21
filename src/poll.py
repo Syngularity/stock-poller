@@ -1,17 +1,14 @@
-from influxdb_client.client.influxdb_client import InfluxDBClient
-from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
-from influxdb_client.client.write_api import SYNCHRONOUS
+from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync, QueryApiAsync
 import pandas as pd
 import json
 import logging
-import redis
 from datetime import datetime, timedelta
 import pytz
 import os
 import requests
-import time
 from influxdb_client.client.exceptions import InfluxDBError
 from prometheus_client import start_http_server, Summary
+import aioredis
 import asyncio
 
 
@@ -53,21 +50,6 @@ bucket_historical = os.getenv("INFLUX_BUCKET_HISTORICAL")
 MULTIPLIER_THRESHOLD = float(os.getenv("MULTIPLIER_THRESHOLD", 4.5))
 DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 
-blocking_client = InfluxDBClient(url=url, token=token, org=org)
-
-try:
-    # Try a cheap query to validate connection
-    health = blocking_client.ping()
-    if not health:
-        logger.error("InfluxDB ping failed — server not reachable.")
-        raise ConnectionError("InfluxDB is not responding to ping.")
-    logger.info("✅ Connected to InfluxDB.")
-except InfluxDBError as e:
-    logger.exception(f"InfluxDB client error: {type(e).__name__} - {e}")
-    raise
-except Exception as e:
-    logger.exception(f"Unhandled error checking InfluxDB connection: {type(e).__name__} - {e}")
-    raise
 
 # Calculate seconds left till midnight eastern
 def seconds_until_midnight():
@@ -76,8 +58,9 @@ def seconds_until_midnight():
     midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return int((midnight - now).total_seconds())
 
+
 # Grab influx data and format to DF
-async def fetch_and_format(flux_query, value_name, async_query_api):
+async def fetch_and_format(flux_query, value_name, async_query_api: QueryApiAsync):
     with INFLUX_QUERY_DURATION.labels(query=value_name).time():
         try:
             df = await async_query_api.query_data_frame(org=org, query=flux_query)
@@ -93,6 +76,7 @@ async def fetch_and_format(flux_query, value_name, async_query_api):
         except Exception as e:
             logger.exception(f"Failed query for {value_name}")
             return pd.DataFrame()
+
 
 # Alert Service Stub
 def send_to_alerts_service(ticker_data):
@@ -191,28 +175,99 @@ from(bucket: "default") |> range(start: -3d)
   |> keep(columns: ["ticker", "float"])
 '''
 
-async def run_influx_queries():
-    async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
-    async_query_api = async_client.query_api()
-    results = await asyncio.gather(
+async def run_influx_queries(async_query_api: QueryApiAsync):
+    return await asyncio.gather(
         fetch_and_format(flux_10mav, "10mav", async_query_api ),
         fetch_and_format(flux_last_volume, "volume", async_query_api),
         fetch_and_format(flux_old_price, "old_price", async_query_api),
         fetch_and_format(flux_current_price, "current_price", async_query_api),
         fetch_and_format(flux_float, "float", async_query_api),
     )
-    await async_client.close()
-    return results
 
-if __name__ == "__main__":
-    start_http_server(8000)
-    logger.info("Starting poller loop")
+async def process_ticker(r, row, now):
+    try:
+        ticker = row["ticker"]
+
+        date_str = pd.to_datetime(now).date().isoformat()
+        key = f"scanner:{date_str}:{ticker}"
+        latest_key = f"scanner:latest:{ticker}"
+
+
+        payload = {
+            "ticker": ticker,
+            "price": row["current_price"],
+            "prev_price": row["old_price"],
+            "volume": row["volume"],
+            "mav10": row["10mav"],
+            "float": row["float"],
+            "delta": row["delta"],
+            "multiplier": row["multiplier"],
+            "timestamp": now
+        }
+
+        # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
+        ttl_seconds = seconds_until_midnight() + 600
+
+        with REDIS_DURATION.time():
+            # This batches requests to redis
+            async with r.pipeline() as pipe:
+                ticker_already_alerted_today = await r.exists(latest_key) 
+                key_from_redis = await r.get(key)
+                await pipe.execute()
+
+            # Check if historical key already exists
+            first_seen = now
+            if key_from_redis is not None:
+                try:
+                    existing = json.loads(key_from_redis)
+                    first_seen = existing.get("first_seen", now)
+                except Exception:
+                    logger.warning(f"Couldn't parse existing Redis key for {ticker}, using current time.")
+
+            payload["first_seen"] = first_seen
+
+            # This batches requests to redis
+            async with r.pipeline() as pipe:
+                r.set(latest_key, json.dumps(payload), ex=ttl_seconds)
+                # Duplicate historical records so we can do some fast charting or whatever with it
+                r.set(key, json.dumps(payload))
+                await pipe.execute()
+
+
+        if payload["multiplier"] > MULTIPLIER_THRESHOLD and not ticker_already_alerted_today:
+            logger.info(f"🚨 Alerting for ticker: {ticker} with multiplier {payload['multiplier']}")
+            send_to_alerts_service(payload)
+    except Exception as e:
+        logger.exception(
+            f"Failed processing ticker '{row.get('ticker', 'UNKNOWN')}': {type(e).__name__}: {str(e)}"
+        )
+
+
+async def start_poll_loop():
+    async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
+    async_query_api = async_client.query_api()
+
+    try:
+        health = await async_client.ping()
+        if not health:
+            logger.error("InfluxDB ping failed — server not reachable.")
+            raise ConnectionError("InfluxDB is not responding to ping.")
+        logger.info("✅ Connected to InfluxDB.")
+    except InfluxDBError as e:
+        logger.exception(f"InfluxDB client error: {type(e).__name__} - {e}")
+        raise
+    except Exception as e:
+        logger.exception(f"Unhandled error checking InfluxDB connection: {type(e).__name__} - {e}")
+        raise
+
+    r: aioredis.Redis = await aioredis.from_url(host=redis_host, port=redis_port, db=0, password=redis_password)
+
     while True:
         try:
             with POLL_DURATION.time():
                 try:
                     with INFLUX_DURATION.time():
-                        df_mav, df_last_vol, df_old_price, df_curr_price, df_float = asyncio.run(run_influx_queries())
+                        df_mav, df_last_vol, df_old_price, df_curr_price, df_float = await run_influx_queries(async_query_api)
 
                     required_dfs = {
                         "df_mav": df_mav,
@@ -225,14 +280,15 @@ if __name__ == "__main__":
                     empty_dfs = [name for name, df in required_dfs.items() if df.empty]
                     if empty_dfs:
                         logger.error(f"❌  One or more required DataFrames are empty: {', '.join(empty_dfs)}. Retrying in 30s.")
-                        time.sleep(30)
+                        asyncio.sleep(30)
                         continue
 
-                    logger.info(f"10mav tickers: {df_mav['ticker'].nunique()}, Sample: {df_mav['ticker'].unique()[:5]}")
-                    logger.info(f"volume tickers: {df_last_vol['ticker'].nunique()}, Sample: {df_last_vol['ticker'].unique()[:5]}")
-                    logger.info(f"old_price tickers: {df_old_price['ticker'].nunique()}, Sample: {df_old_price['ticker'].unique()[:5]}")
-                    logger.info(f"current_price tickers: {df_curr_price['ticker'].nunique()}, Sample: {df_curr_price['ticker'].unique()[:5]}")
-                    logger.info(f"float tickers: {df_float['ticker'].nunique()}, Sample: {df_float['ticker'].unique()[:5]}")
+                    if logger.isEnabledFor(logging.DEBUG):        
+                        logger.debug(f"10mav tickers: {df_mav['ticker'].nunique()}, Sample: {df_mav['ticker'].unique()[:5]}")
+                        logger.debug(f"volume tickers: {df_last_vol['ticker'].nunique()}, Sample: {df_last_vol['ticker'].unique()[:5]}")
+                        logger.debug(f"old_price tickers: {df_old_price['ticker'].nunique()}, Sample: {df_old_price['ticker'].unique()[:5]}")
+                        logger.debug(f"current_price tickers: {df_curr_price['ticker'].nunique()}, Sample: {df_curr_price['ticker'].unique()[:5]}")
+                        logger.debug(f"float tickers: {df_float['ticker'].nunique()}, Sample: {df_float['ticker'].unique()[:5]}")
 
                     common_tickers = set(df_mav['ticker']) & set(df_last_vol['ticker']) & set(df_old_price['ticker']) & set(df_curr_price['ticker']) & set(df_float['ticker'])
                     logger.info(f"🧪 Common tickers across all datasets: {len(common_tickers)}")
@@ -258,64 +314,18 @@ if __name__ == "__main__":
                     df["multiplier"] = df["volume"] / df["10mav"]
                     logger.info(f"✅ Merged DataFrame with {len(df)} rows after filtering.")
 
-                with REDIS_DURATION.time():
-                    r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password)
 
                 with ALERT_DURATION.time():
                     if not df.empty:
-                        for _, row in df.iterrows():
-                            try:
-                                ticker = row["ticker"]
-
-                                date_str = pd.to_datetime(now).date().isoformat()
-                                key = f"scanner:{date_str}:{ticker}"
-                                latest_key = f"scanner:latest:{ticker}"
-
-
-                                payload = {
-                                    "ticker": ticker,
-                                    "price": row["current_price"],
-                                    "prev_price": row["old_price"],
-                                    "volume": row["volume"],
-                                    "mav10": row["10mav"],
-                                    "float": row["float"],
-                                    "delta": row["delta"],
-                                    "multiplier": row["multiplier"],
-                                    "timestamp": now
-                                }
-
-                                # Alert trigger check
-                                ticker_already_alerted_today = r.exists(latest_key) 
-                                # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
-                                ttl_seconds = seconds_until_midnight() + 600
-
-
-                                # Check if historical key already exists
-                                first_seen = now
-                                if r.exists(key):
-                                    try:
-                                        existing = json.loads(r.get(key))
-                                        first_seen = existing.get("first_seen", now)
-                                    except Exception:
-                                        logger.warning(f"Couldn't parse existing Redis key for {ticker}, using current time.")
-
-                                payload["first_seen"] = first_seen
-                                
-                                r.set(latest_key, json.dumps(payload), ex=ttl_seconds)
-
-                                # Duplicate historical records so we can do some fast charting or whatever with it
-                                r.set(key, json.dumps(payload))
-
-
-                                if payload["multiplier"] > MULTIPLIER_THRESHOLD and not ticker_already_alerted_today:
-                                    logger.info(f"🚨 Alerting for ticker: {ticker} with multiplier {payload['multiplier']}")
-                                    send_to_alerts_service(payload)
-                            except Exception as e:
-                                logger.exception(
-                                    f"Failed processing ticker '{row.get('ticker', 'UNKNOWN')}': {type(e).__name__}: {str(e)}"
-                                )
+                        tasks = [process_ticker(r, row, now) for _, row in df.iterrows()]
+                        await asyncio.gather(*tasks)
         except Exception:
             logger.exception("Polling iteration failed")
-        time.sleep(5)
+        asyncio.sleep(5)
 
 
+if __name__ == "__main__":
+    logger.info("Starting metric server")
+    start_http_server(8000)
+    logger.info("Starting poller loop")
+    asyncio.run(start_poll_loop())
