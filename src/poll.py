@@ -267,6 +267,7 @@ if __name__ == "__main__":
                                 # Alert trigger check
                                 ticker_already_alerted_today = r.exists(latest_key) 
                                 if payload["multiplier"] > MULTIPLIER_THRESHOLD and not ticker_already_alerted_today:
+                                    logger.info(f"🚨 Alerting for ticker: {ticker} with multiplier {payload['multiplier']}")
                                     send_to_alerts_service(payload)
                             except Exception as e:
                                 logger.exception(
