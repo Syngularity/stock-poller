@@ -191,11 +191,15 @@ if __name__ == "__main__":
                         continue
 
                     logger.info("All required data frames present")
+                    logger.info(f"df_mav rows: {len(df_mav)}")
+                    logger.info(f"df_last_vol rows: {len(df_last_vol)}")
+                    logger.info(f"df_old_price rows: {len(df_old_price)}")
+                    logger.info(f"df_curr_price rows: {len(df_curr_price)}")
+                    logger.info(f"df_float rows: {len(df_float)}")
                     df = df_mav.merge(df_last_vol, on="ticker") \
-                                .merge(df_old_price, on="ticker") \
-                                .merge(df_curr_price, on="ticker") \
-                                .merge(df_float, on="ticker")
-                    
+                        .merge(df_old_price, on="ticker") \
+                        .merge(df_curr_price, on="ticker") \
+                        .merge(df_float, on="ticker")
                     logger.info(f"Merged DataFrame with {len(df)} records.")
 
                 except Exception:
