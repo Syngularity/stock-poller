@@ -71,17 +71,6 @@ def fetch_and_format(flux_query, value_name):
         if isinstance(df, list):
             df = pd.concat(df, ignore_index=True)
 
-        # Rename field value column from influx
-        if "ticker" in df.columns:
-            df["ticker"] = df["ticker"].fillna(df["sym"] if "sym" in df.columns else None)
-        elif "sym" in df.columns:
-            df["ticker"] = df["sym"]
-        else:
-            logger.warning("Neither 'ticker' nor 'sym' columns found in dataframe.")
-
-        # Set ticker column with sym if influx returned that for ticker
-        df["ticker"] = df["ticker"].fillna(df["sym"])
-
         logger.info(f"✅ Successfully fetched {value_name} data from InfluxDB. {len(df)} rows.")
         return df
     except Exception as e:
