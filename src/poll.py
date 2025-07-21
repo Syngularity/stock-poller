@@ -133,7 +133,18 @@ from(bucket: "stocks_1s")
   |> filter(fn: (r) => r._measurement == "t" and r._field == "av")
   |> group(columns: ["sym"])
   |> last()
-  |> map(fn: (r) => ({ r with ticker: r.sym }))
+  |> rename(columns: {sym: "ticker"})
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+'''
+
+flux_current_price = '''
+from(bucket: "stocks_1s")
+  |> range(start: -2d)
+  |> filter(fn: (r) => r._measurement == "t" and r._field == "c")
+  |> group(columns: ["sym"])
+  |> last()
+  |> filter(fn: (r) => r._value >= 1.0 and r._value <= 20.0)
+  |> rename(columns: {sym: "ticker"})
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
 
@@ -143,22 +154,12 @@ from(bucket: "stocks_5m")
   |> filter(fn: (r) => r._measurement == "t" and r._field == "c")
   |> group(columns: ["sym"])
   |> last()
-  |> map(fn: (r) => ({ r with ticker: r.sym }))
+  |> rename(columns: {sym: "ticker"})
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
 
-flux_current_price = '''
-from(bucket: "stocks_1s")
-  |> range(start: -2d)
-  |> filter(fn: (r) => r._measurement == "t" and r._field == "c")
-  |> filter(fn: (r) => r._value >= 1.0 and r._value <= 20.0)
-  |> group(columns: ["sym"])
-  |> last()
-  |> map(fn: (r) => ({ r with ticker: r.sym }))
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-'''
-
-flux_float = ''' from(bucket: "default") |> range(start: -3d)
+flux_float = '''
+from(bucket: "default") |> range(start: -3d)
   |> filter(fn: (r) => r._measurement == "float" and r._field == "shares")
   |> filter(fn: (r) => r._value <= 10000000)
   |> group(columns: ["ticker"])
