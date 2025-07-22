@@ -309,7 +309,7 @@ async def start_poll_loop():
 
 
                 with ALERT_DURATION.time():
-                    if not df.empty and df["multiplier"] >= MULTIPLIER_THRESHOLD:
+                    if not df.empty:
                         tasks = [process_ticker(r, row, now) for _, row in df.iterrows()]
                         await asyncio.gather(*tasks)
         except Exception:
