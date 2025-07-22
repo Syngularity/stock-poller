@@ -12,7 +12,7 @@ spec:
   template:
     metadata:
       annotations:
-        git-tag: TAG
+        git-tag: "v50"
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
         prometheus.io/path: "/metrics"
