@@ -8,7 +8,7 @@ data:
   INFLUX_BUCKET_HISTORICAL: "historical"
   INFLUX_BUCKET_STOCK: "default"
   REDIS_HOST: "redis://redis-master.redis.svc.cluster.local"
-  ALERT_HOST: "http://alert-deployment.stock.svc.cluster.local:5000/send_momentum_alert"
+  ALERT_HOST: "http://alert-service.stock.svc.cluster.local:5000/send_momentum_alert"
   REDIS_PORT: "6379"
   INFLUX_ORG: "influxdata"
   INFLUX_URL: "http://influx-influxdb2.influx.svc.cluster.local"
