@@ -47,7 +47,7 @@ redis_password = os.getenv("REDIS_PASSWORD")
 org = os.getenv("INFLUX_ORG")
 bucket_stock = os.getenv("INFLUX_BUCKET_STOCK")
 bucket_historical = os.getenv("INFLUX_BUCKET_HISTORICAL")
-MULTIPLIER_THRESHOLD = float(os.getenv("MULTIPLIER_THRESHOLD", 4.5))
+MULTIPLIER_THRESHOLD = float(os.getenv("MULTIPLIER_THRESHOLD", 1))
 DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 
 
@@ -309,7 +309,7 @@ async def start_poll_loop():
 
 
                 with ALERT_DURATION.time():
-                    if not df.empty:
+                    if not df.empty and df["multiplier"] >= MULTIPLIER_THRESHOLD:
                         tasks = [process_ticker(r, row, now) for _, row in df.iterrows()]
                         await asyncio.gather(*tasks)
         except Exception:
