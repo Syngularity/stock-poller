@@ -73,6 +73,13 @@ VOLUME_PHASES = [
     {"name": "Late", "start": 60, "end": float("inf"), "base_threshold": 0.10},
 ]
 
+MAV10_PHASES = [
+    {"name": "Early Premarket", "start": -120, "end": 0, "base_threshold": 0.5},
+    {"name": "Early Market", "start": 0, "end": 15, "base_threshold": 0.8},
+    {"name": "1st Hour Market", "start": 15, "end": 60, "base_threshold": 1.2},
+    {"name": "Late Market", "start": 60, "end": float("inf"), "base_threshold": 2.5},
+]
+
 ALERT_TIERS_THRESHOLDS = [
     ("HIGH", 10),
     ("MEDIUM", 3),
@@ -92,6 +99,11 @@ def volume_threshold_by_time(minutes_since_open):
             return phase["name"], phase["base_threshold"]
     return "NA", float("inf")
 
+def mav10_threshold_by_time(minutes_since_open):
+    for phase in MAV10_PHASES:
+        if phase["start"] <= minutes_since_open < phase["end"]:
+            return phase["name"], phase["base_threshold"]
+    return "NA", float("inf")
 
 def get_alert_tier(volume_ratio, base_threshold):
     for label, ratio in ALERT_TIERS_THRESHOLDS:
@@ -299,11 +311,20 @@ async def process_ticker(r: redis.Redis, row, now):
                 r.set(key, json.dumps(payload)))
 
 
-        if payload['volume'] > 100000:
+        if payload['volume'] > 100000 and payload["multiplier"] > 1:
+
+            minutes_open = get_minutes_since_open(now)
 
             phase, base_threshold = volume_threshold_by_time(minutes_since_open=get_minutes_since_open(now))
+            _, mav10_threshold = mav10_threshold_by_time(minutes_open)
 
-            vol_float_ratio = payload['volume']/payload['float'] 
+            vol_float_ratio = payload['volume']/payload['float']
+        
+            
+            if payload["multiplier"] < mav10_threshold:
+                logger.debug(f"Suppressed alert for {ticker}: volume/mav10 {payload["multiplier"]:.2f} < threshold {mav10_threshold:.2f}")
+                return
+            
             tier = get_alert_tier(vol_float_ratio, base_threshold)
 
 
