@@ -60,11 +60,6 @@ def get_minutes_since_open(now=None):
     minutes_diff = int((now - market_open).total_seconds() / 60)
     return minutes_diff
 
-# Return the alerting percentage thresholds for different day parts. IE A stock might alert earlier at lower moves if it's premarket
-
- 
-
-
 
 VOLUME_PHASES = [
     {"name": "Early Premarket", "start": -120, "end": 0, "base_threshold": 0.03},
@@ -175,7 +170,7 @@ def send_to_alerts_service(ticker_data):
         "Content-Type": "application/json"
     }
 
-    print(f"Sending payload to {url}:")
+    print(f"Sending payload to {alert_url}:")
     print(json.dumps(payload, indent=2))
 
     try:
@@ -192,7 +187,7 @@ def send_to_alerts_service(ticker_data):
 
     except requests.exceptions.ConnectionError:
         print(f"\nError: Could not connect to Flask server at {url}.")
-        print("Please ensure your Flask app is running on http://127.0.0.1:5001.")
+
     except Exception as e:
         print(f"\nAn unexpected error occurred: {e}")
 
