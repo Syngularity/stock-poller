@@ -329,6 +329,7 @@ async def process_ticker(r: redis.Redis, row, now):
 
 
             if tier:
+                
                 payload['tier'] = tier
                 payload['phase'] = phase
 
