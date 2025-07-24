@@ -8,7 +8,7 @@ redis_password = os.getenv("REDIS_PASSWORD")
 r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password)
 
 # Fetch all alert-related keys (adjust the pattern if your alert keys are different)
-alert_keys = r.keys("alert:*")
+alert_keys = r.keys("momentum_alert:*")
 
 deleted_count = 0
 for key in alert_keys:
