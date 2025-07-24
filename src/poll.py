@@ -38,7 +38,7 @@ DELT_MULT_DURATION = make_summary('delt_mult_duration_seconds', 'delt mult durat
 REDIS_DURATION = make_summary('redis_duration_seconds', 'redis duration in seconds')
 ALERT_DURATION = make_summary('alert_duration_seconds', 'alert duration in seconds')
 
-alert_url = os.getenv("ALERT_URL")
+alert_url = os.getenv("ALERT_HOST")
 url = os.getenv("INFLUX_URL")
 token = os.getenv("INFLUX_TOKEN")
 redis_host = "redis://" + os.getenv("REDIS_HOST")
@@ -62,13 +62,16 @@ def get_minutes_since_open(now=None):
 
 # Return the alerting percentage thresholds for different day parts. IE A stock might alert earlier at lower moves if it's premarket
 
+ 
+
+
+
 VOLUME_PHASES = [
     {"name": "Early Premarket", "start": -120, "end": 0, "base_threshold": 0.03},
     {"name": "Early Market", "start": 0, "end": 15, "base_threshold": 0.05},
     {"name": "Market", "start": 15, "end": 60, "base_threshold": 0.08},
     {"name": "Late", "start": 60, "end": float("inf"), "base_threshold": 0.10},
 ]
-
 
 ALERT_TIERS_THRESHOLDS = [
     ("HIGH", 10),
