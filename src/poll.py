@@ -54,8 +54,6 @@ DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 def get_minutes_since_open(now=None):
     if not now:
         now = datetime.now()
-    else:
-        now = now.isoformat()  
 
     market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
     minutes_diff = int((now - market_open).total_seconds() / 60)
