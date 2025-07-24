@@ -275,7 +275,7 @@ async def process_ticker(r: redis.Redis, row, now):
 
         with REDIS_DURATION.time():
 
-            key_from_redis = await asyncio.gather( r.get(key))
+            key_from_redis = await r.get(key)
 
 
 
