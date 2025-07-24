@@ -291,8 +291,6 @@ async def process_ticker(r: redis.Redis, row, now):
 
             key_from_redis = await r.get(key)
 
-
-
             # Check if historical key already exists
             first_seen = now
             if key_from_redis is not None:
@@ -322,14 +320,15 @@ async def process_ticker(r: redis.Redis, row, now):
         
             
             if payload["multiplier"] < mav10_threshold:
-                logger.debug(f"Suppressed alert for {ticker}: volume/mav10 {payload["multiplier"]:.2f} < threshold {mav10_threshold:.2f}")
+                logger.debug(f'Suppressed alert for {ticker}: volume/mav10 {payload["multiplier"]:.2f} < threshold {mav10_threshold:.2f}')
+
                 return
             
             tier = get_alert_tier(vol_float_ratio, base_threshold)
 
 
             if tier:
-                
+
                 payload['tier'] = tier
                 payload['phase'] = phase
 
