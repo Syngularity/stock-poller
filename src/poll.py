@@ -38,7 +38,7 @@ DELT_MULT_DURATION = make_summary('delt_mult_duration_seconds', 'delt mult durat
 REDIS_DURATION = make_summary('redis_duration_seconds', 'redis duration in seconds')
 ALERT_DURATION = make_summary('alert_duration_seconds', 'alert duration in seconds')
 
-alert_url = os.getenv("ALERT_HOST")
+alert_url = os.getenv("ALERT_URL")
 url = os.getenv("INFLUX_URL")
 token = os.getenv("INFLUX_TOKEN")
 redis_host = "redis://" + os.getenv("REDIS_HOST")
@@ -50,6 +50,53 @@ bucket_historical = os.getenv("INFLUX_BUCKET_HISTORICAL")
 MULTIPLIER_THRESHOLD = float(os.getenv("MULTIPLIER_THRESHOLD", 1))
 DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 
+# Calculate minutes since market open
+def get_minutes_since_open(now=None):
+    if not now:
+        now = datetime.now()
+    else:
+        now = now.isoformat()  
+
+    market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    minutes_diff = int((now - market_open).total_seconds() / 60)
+    return minutes_diff
+
+# Return the alerting percentage thresholds for different day parts. IE A stock might alert earlier at lower moves if it's premarket
+
+VOLUME_PHASES = [
+    {"name": "Early Premarket", "start": -120, "end": 0, "base_threshold": 0.03},
+    {"name": "Early Market", "start": 0, "end": 15, "base_threshold": 0.05},
+    {"name": "Market", "start": 15, "end": 60, "base_threshold": 0.08},
+    {"name": "Late", "start": 60, "end": float("inf"), "base_threshold": 0.10},
+]
+
+
+ALERT_TIERS_THRESHOLDS = [
+    ("HIGH", 10),
+    ("MEDIUM", 3),
+    ("LOW", 1),
+]
+
+TIER_PRIORITY = {
+    "LOW": 1,
+    "MEDIUM": 2,
+    "HIGH": 3
+}
+
+
+def volume_threshold_by_time(minutes_since_open):
+    for phase in VOLUME_PHASES:
+        if phase["start"] <= minutes_since_open < phase["end"]:
+            return phase["name"], phase["base_threshold"]
+    return "NA", float("inf")
+
+
+def get_alert_tier(volume_ratio, base_threshold):
+    for label, ratio in ALERT_TIERS_THRESHOLDS:
+        if volume_ratio >= base_threshold * ratio:
+            return label
+    return None
+
 
 # Calculate seconds left till midnight eastern
 def seconds_until_midnight():
@@ -57,6 +104,25 @@ def seconds_until_midnight():
     now = datetime.now(eastern)
     midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return int((midnight - now).total_seconds())
+
+
+def should_send_alert(ticker: str, new_tier: str):
+    today = datetime.now().strftime('%Y%m%d')
+    key = f"momentum_alert:{ticker}:{today}"
+
+    # Get existing alert tier from Redis
+    current_tier = r.get(key)
+    current_priority = TIER_PRIORITY.get(current_tier.decode(), 0) if current_tier else 0
+    new_priority = TIER_PRIORITY[new_tier]
+
+    # Only alert if it's higher than the current
+    if new_priority > current_priority:
+        ttl = get_seconds_until_midnight()
+        r.setex(key, ttl, new_tier)
+        return True
+
+    return False
+
 
 
 # Grab influx data and format to DF
@@ -167,7 +233,7 @@ from(bucket: "stocks_5m")
 flux_float = '''
 from(bucket: "default") |> range(start: -3d)
   |> filter(fn: (r) => r._measurement == "float" and r._field == "shares")
-  |> filter(fn: (r) => r._value <= 20000000)
+  |> filter(fn: (r) => r._value <= 0000000)
   |> group(columns: ["ticker"])
   |> last()
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
@@ -192,6 +258,7 @@ async def process_ticker(r: redis.Redis, row, now):
         key = f"scanner:{date_str}:{ticker}"
         latest_key = f"scanner:latest:{ticker}"
 
+
         payload = {
             "ticker": ticker,
             "price": row["current_price"],
@@ -206,7 +273,7 @@ async def process_ticker(r: redis.Redis, row, now):
 
         with REDIS_DURATION.time():
 
-            ticker_already_alerted_today, key_from_redis = await asyncio.gather(r.exists(latest_key), r.get(key))
+            key_from_redis = await asyncio.gather( r.get(key))
 
             # Check if historical key already exists
             first_seen = now
@@ -219,16 +286,41 @@ async def process_ticker(r: redis.Redis, row, now):
 
             payload["first_seen"] = first_seen
 
-            if payload['multiplier'] >= MULTIPLIER_THRESHOLD:
-                if not ticker_already_alerted_today:
+            # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
+            ttl_seconds = seconds_until_midnight() + 600
+            await asyncio.gather(
+                r.set(latest_key, json.dumps(payload), ex=ttl_seconds), 
+                r.set(key, json.dumps(payload)))
+
+
+        if payload['volume'] > 100000:
+
+            phase, base_threshold = volume_threshold_by_time(minutes_since_open=get_minutes_since_open(now))
+
+            vol_float_ratio = payload['volume']/payload['float'] 
+            tier = get_alert_tier(vol_float_ratio, base_threshold)
+
+
+            if tier:
+                payload['tier'] = tier
+                payload['phase'] = phase
+
+                redis_alert_key = f"momentum_alert:{ticker}:{pd.to_datetime(now).date().isoformat()}"
+                current = await r.get(redis_alert_key)
+                current_rank = TIER_PRIORITY.get(current.decode(), 0) if current else 0
+                new_rank = TIER_PRIORITY[tier]
+
+                if new_rank > current_rank:
+                    ttl = seconds_until_midnight() + 600
+                    await r.set(redis_alert_key, tier, ex=ttl)
+
+                    print(f"{tier} alert triggered during {phase}: "
+                        f"{vol_float_ratio:.2f} (base: {base_threshold}, ratio: {vol_float_ratio/base_threshold:.2f}x)")
                     logger.info(f"🚨 Alerting for ticker: {ticker} with multiplier {payload['multiplier']}")
                     send_to_alerts_service(payload)
+                else:
+                    logger.debug(f"Suppressed {tier} alert for {ticker}: already sent {current.decode() if current else 'None'}")
 
-                # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
-                ttl_seconds = seconds_until_midnight() + 600
-                await asyncio.gather(
-                    r.set(latest_key, json.dumps(payload), ex=ttl_seconds), 
-                    r.set(key, json.dumps(payload)))
 
     except Exception as e:
         logger.exception(
@@ -305,6 +397,10 @@ async def start_poll_loop():
                     # df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
 
                     df["multiplier"] = df["volume"] / df["10mav"]
+
+
+
+                    
                     logger.info(f"✅ Merged DataFrame with {len(df)} rows after filtering.")
 
 
