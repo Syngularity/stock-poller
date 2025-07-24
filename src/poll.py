@@ -119,7 +119,7 @@ def should_send_alert(ticker: str, new_tier: str):
 
     # Only alert if it's higher than the current
     if new_priority > current_priority:
-        ttl = get_seconds_until_midnight()
+        ttl = seconds_until_midnight()
         r.setex(key, ttl, new_tier)
         return True
 
@@ -155,6 +155,8 @@ def send_to_alerts_service(ticker_data):
         "multiplier": ticker_data['multiplier'],
         "float_value": ticker_data['float'],
         "volume": ticker_data['volume'],
+        "tier": ticker_data['tier'],
+        "phase": ticker_data['phase'],
     }
 
     headers = {
