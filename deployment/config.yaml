@@ -12,4 +12,4 @@ data:
   REDIS_PORT: "6379"
   INFLUX_ORG: "influxdata"
   INFLUX_URL: "http://influx-influxdb2.influx.svc.cluster.local"
-  MULTIPLIER_THRESHOLD: '4.5'
+  MULTIPLIER_THRESHOLD: '2'
