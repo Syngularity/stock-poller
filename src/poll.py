@@ -233,7 +233,7 @@ from(bucket: "stocks_5m")
 flux_float = '''
 from(bucket: "default") |> range(start: -3d)
   |> filter(fn: (r) => r._measurement == "float" and r._field == "shares")
-  |> filter(fn: (r) => r._value <= 0000000)
+  |> filter(fn: (r) => r._value <= 2000000)
   |> group(columns: ["ticker"])
   |> last()
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
@@ -314,9 +314,9 @@ async def process_ticker(r: redis.Redis, row, now):
                     ttl = seconds_until_midnight() + 600
                     await r.set(redis_alert_key, tier, ex=ttl)
 
-                    print(f"{tier} alert triggered during {phase}: "
+                    logger.info(f"{tier} alert triggered during {phase}: "
                         f"{vol_float_ratio:.2f} (base: {base_threshold}, ratio: {vol_float_ratio/base_threshold:.2f}x)")
-                    logger.info(f"🚨 Alerting for ticker: {ticker} with multiplier {payload['multiplier']}")
+
                     send_to_alerts_service(payload)
                 else:
                     logger.debug(f"Suppressed {tier} alert for {ticker}: already sent {current.decode() if current else 'None'}")
