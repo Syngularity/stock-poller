@@ -167,7 +167,7 @@ from(bucket: "stocks_5m")
 flux_float = '''
 from(bucket: "default") |> range(start: -3d)
   |> filter(fn: (r) => r._measurement == "float" and r._field == "shares")
-  |> filter(fn: (r) => r._value <= 10000000)
+  |> filter(fn: (r) => r._value <= 20000000)
   |> group(columns: ["ticker"])
   |> last()
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
