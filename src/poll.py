@@ -50,10 +50,11 @@ bucket_historical = os.getenv("INFLUX_BUCKET_HISTORICAL")
 MULTIPLIER_THRESHOLD = float(os.getenv("MULTIPLIER_THRESHOLD", 1))
 DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 
-# Calculate minutes since market open
 def get_minutes_since_open(now=None):
     if not now:
         now = datetime.now()
+    elif isinstance(now, str):
+        now = datetime.fromisoformat(now)  # parse ISO string to datetime
 
     market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
     minutes_diff = int((now - market_open).total_seconds() / 60)
