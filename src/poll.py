@@ -277,6 +277,8 @@ async def process_ticker(r: redis.Redis, row, now):
 
             key_from_redis = await asyncio.gather( r.get(key))
 
+
+
             # Check if historical key already exists
             first_seen = now
             if key_from_redis is not None:
@@ -284,7 +286,7 @@ async def process_ticker(r: redis.Redis, row, now):
                     existing = json.loads(key_from_redis)
                     first_seen = existing.get("first_seen", now)
                 except Exception:
-                    logger.warning(f"Couldn't parse existing Redis key for {ticker}, using current time.")
+                    logger.warning(f"Couldn't parse existing Redis key for {ticker}, using current time. Key: {key} key from redis: {key_from_redis}")
 
             payload["first_seen"] = first_seen
 
