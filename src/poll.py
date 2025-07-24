@@ -38,7 +38,7 @@ DELT_MULT_DURATION = make_summary('delt_mult_duration_seconds', 'delt mult durat
 REDIS_DURATION = make_summary('redis_duration_seconds', 'redis duration in seconds')
 ALERT_DURATION = make_summary('alert_duration_seconds', 'alert duration in seconds')
 
-alert_url = os.getenv("ALERT_URL")
+alert_url = os.getenv("ALERT_HOST")
 url = os.getenv("INFLUX_URL")
 token = os.getenv("INFLUX_TOKEN")
 redis_host = "redis://" + os.getenv("REDIS_HOST")
@@ -192,7 +192,6 @@ async def process_ticker(r: redis.Redis, row, now):
         key = f"scanner:{date_str}:{ticker}"
         latest_key = f"scanner:latest:{ticker}"
 
-
         payload = {
             "ticker": ticker,
             "price": row["current_price"],
@@ -220,16 +219,17 @@ async def process_ticker(r: redis.Redis, row, now):
 
             payload["first_seen"] = first_seen
 
-            # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
-            ttl_seconds = seconds_until_midnight() + 600
-            await asyncio.gather(
-                r.set(latest_key, json.dumps(payload), ex=ttl_seconds), 
-                r.set(key, json.dumps(payload)))
+            if payload['multiplier'] >= MULTIPLIER_THRESHOLD:
+                if not ticker_already_alerted_today:
+                    logger.info(f"🚨 Alerting for ticker: {ticker} with multiplier {payload['multiplier']}")
+                    send_to_alerts_service(payload)
 
+                # Everything in the "latest" key should invalidate at midnight (throw in 10 min buffer)
+                ttl_seconds = seconds_until_midnight() + 600
+                await asyncio.gather(
+                    r.set(latest_key, json.dumps(payload), ex=ttl_seconds), 
+                    r.set(key, json.dumps(payload)))
 
-        if payload["multiplier"] > MULTIPLIER_THRESHOLD and not ticker_already_alerted_today:
-            logger.info(f"🚨 Alerting for ticker: {ticker} with multiplier {payload['multiplier']}")
-            send_to_alerts_service(payload)
     except Exception as e:
         logger.exception(
             f"Failed processing ticker '{row.get('ticker', 'UNKNOWN')}': {type(e).__name__}: {str(e)}"
