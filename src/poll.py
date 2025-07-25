@@ -220,7 +220,7 @@ from(bucket: "stocks_1s")
 
 flux_current_price = '''
 from(bucket: "stocks_1s")
-  |> range(start: -1h)
+  |> range(start: -1d)
   |> filter(fn: (r) => r._measurement == "t" and r._field == "c")
   |> group(columns: ["sym"])
   |> last()
