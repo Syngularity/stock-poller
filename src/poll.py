@@ -264,7 +264,7 @@ async def run_influx_queries(async_query_api: QueryApiAsync):
 async def process_ticker(r: redis.Redis, row, now):
     try:
         ticker = row["ticker"]
-
+        logger.info(f"processing ticker: {ticker}")
         date_str = pd.to_datetime(now).date().isoformat()
         key = f"scanner:{date_str}:{ticker}"
         latest_key = f"scanner:latest:{ticker}"
