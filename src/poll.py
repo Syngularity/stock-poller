@@ -1,3 +1,4 @@
+from typing import Dict, Optional
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync, QueryApiAsync
 import pandas as pd
 import json
@@ -10,11 +11,10 @@ from influxdb_client.client.exceptions import InfluxDBError
 from prometheus_client import start_http_server, Summary
 import redis.asyncio as redis
 import asyncio
+import websockets
+from aiorwlock import RWLock
+import orjson
 
-
-# Eastern for the STONK MARKETS
-eastern = pytz.timezone("US/Eastern")
-now = datetime.now(eastern).isoformat()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,12 +50,8 @@ bucket_historical = os.getenv("INFLUX_BUCKET_HISTORICAL")
 MULTIPLIER_THRESHOLD = float(os.getenv("MULTIPLIER_THRESHOLD", 1))
 DELTA_THRESHOLD = float(os.getenv("DELTA_THRESHOLD", 8.0))
 
-def get_minutes_since_open(now=None):
-    if not now:
-        now = datetime.now()
-    elif isinstance(now, str):
-        now = datetime.fromisoformat(now)  # parse ISO string to datetime
-
+def get_minutes_since_open():
+    now = datetime.now(pytz.timezone("US/Eastern"))
     market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
     minutes_diff = int((now - market_open).total_seconds() / 60)
     return minutes_diff
@@ -133,7 +129,6 @@ def should_send_alert(ticker: str, new_tier: str):
     return False
 
 
-
 # Grab influx data and format to DF
 async def fetch_and_format(flux_query, value_name, async_query_api: QueryApiAsync):
     with INFLUX_QUERY_DURATION.labels(query=value_name).time():
@@ -154,7 +149,7 @@ async def fetch_and_format(flux_query, value_name, async_query_api: QueryApiAsyn
 
 
 # Alert Service Stub
-def send_to_alerts_service(ticker_data):
+async def send_to_alerts_service(ticker_data):
 
     payload = {
         "ticker": ticker_data['ticker'],
@@ -207,29 +202,6 @@ from(bucket: "10_mav")
   |> keep(columns: ["ticker", "10mav"])
 '''
 
-flux_last_volume = '''
-from(bucket: "stocks_1s")
-  |> range(start: -24h)
-  |> filter(fn: (r) => r._measurement == "t" and r._field == "av")
-  |> group(columns: ["sym"])
-  |> last()
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> rename(columns: {sym: "ticker", av: "volume"})
-  |> keep(columns: ["ticker", "volume"])
-'''
-
-flux_current_price = '''
-from(bucket: "stocks_1s")
-  |> range(start: -2d)
-  |> filter(fn: (r) => r._measurement == "t" and r._field == "c")
-  |> group(columns: ["sym"])
-  |> last()
-  |> filter(fn: (r) => r._value >= 1.0 and r._value <= 20.0)
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> rename(columns: {sym: "ticker", c: "current_price"})
-  |> keep(columns: ["ticker", "current_price"])
-'''
-
 flux_old_price = '''
 from(bucket: "stocks_5m")
   |> range(start: -3d)
@@ -252,33 +224,39 @@ from(bucket: "default") |> range(start: -3d)
   |> keep(columns: ["ticker", "float"])
 '''
 
+dataframes: Dict[str, Optional[pd.DataFrame]] = {
+    "10mav": None,
+    "old_price": None, 
+    "float": None
+}
+dataframes_rwlock = RWLock()
+
 async def run_influx_queries(async_query_api: QueryApiAsync):
     return await asyncio.gather(
         fetch_and_format(flux_10mav, "10mav", async_query_api ),
-        fetch_and_format(flux_last_volume, "volume", async_query_api),
         fetch_and_format(flux_old_price, "old_price", async_query_api),
-        fetch_and_format(flux_current_price, "current_price", async_query_api),
         fetch_and_format(flux_float, "float", async_query_api),
     )
 
-async def process_ticker(r: redis.Redis, row, now):
+async def set_ticker_index(df: pd.DataFrame):
+    if df.index.name != "ticker":
+        df.set_index("ticker")
+
+async def process_ticker(r: redis.Redis, now, ticker, cp, op, v, mav, float, delta, multiplier):
     try:
-        ticker = row["ticker"]
-        
         date_str = pd.to_datetime(now).date().isoformat()
         key = f"scanner:{date_str}:{ticker}"
         latest_key = f"scanner:latest:{ticker}"
 
-
         payload = {
             "ticker": ticker,
-            "price": row["current_price"],
-            "prev_price": row["old_price"],
-            "volume": row["volume"],
-            "mav10": row["10mav"],
-            "float": row["float"],
-            "delta": row["delta"],
-            "multiplier": row["multiplier"],
+            "price": cp,
+            "prev_price": op,
+            "volume": v,
+            "mav10": mav,
+            "float": float,
+            "delta": delta,
+            "multiplier": multiplier,
             "timestamp": now
         }
 
@@ -339,104 +317,100 @@ async def process_ticker(r: redis.Redis, row, now):
                     logger.info(f"{tier} alert triggered during {phase}: "
                         f"{vol_float_ratio:.2f} (base: {base_threshold}, ratio: {vol_float_ratio/base_threshold:.2f}x)")
 
-                    send_to_alerts_service(payload)
+                    await send_to_alerts_service(payload)
                 else:
                     logger.debug(f"Suppressed {tier} alert for {ticker}: already sent {current.decode() if current else 'None'}")
 
 
     except Exception as e:
         logger.exception(
-            f"Failed processing ticker '{row.get('ticker', 'UNKNOWN')}': {type(e).__name__}: {str(e)}"
+            f"Failed processing ticker '{ticker}': {type(e).__name__}: {str(e)}"
         )
 
+def parse_ws_message(message: bytes) -> tuple:
+    data = orjson.loads(message)
+    return (
+        data.get('sym'),      # symbol
+        data.get('c'),        # close  
+        data.get('v'),        # volume
+    )
 
-async def start_poll_loop():
-    async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
-    async_query_api = async_client.query_api()
-
+async def lookup(df: pd.DataFrame, ticker):
+    if df is None:
+        return None
     try:
-        health = await async_client.ping()
-        if not health:
-            logger.error("InfluxDB ping failed — server not reachable.")
-            raise ConnectionError("InfluxDB is not responding to ping.")
-        logger.info("✅ Connected to InfluxDB.")
-    except InfluxDBError as e:
-        logger.exception(f"InfluxDB client error: {type(e).__name__} - {e}")
-        raise
-    except Exception as e:
-        logger.exception(f"Unhandled error checking InfluxDB connection: {type(e).__name__} - {e}")
-        raise
+        return df.loc[ticker]
+    except KeyError:
+        return None
 
+
+async def handle_message(r, message):
+    ticker, current_price, volume = parse_ws_message(message)
+
+    # Need reader lock because these dataframes are updating in the bg
+    async with dataframes_rwlock.reader:
+        mav = await lookup(dataframes["10mav"], ticker)
+        old_price = await lookup(dataframes["old_price"], ticker)
+        float = await lookup(dataframes["float"], ticker)
+
+    if mav is None or old_price is None or float is None:
+        # Do not process ticker if it's missing data
+        # Could turn on debug logging here
+        return
+
+    delta = ((current_price - old_price) / old_price)
+    multiplier = volume / mav
+
+    now = datetime.now(pytz.timezone("US/Eastern")).isoformat()
+
+    await process_ticker(r, now, ticker, current_price, old_price, volume, mav, float, delta, multiplier)
+
+    pass
+
+async def listen_websocket():
+    uri = "ws://ingestor-service.stock.svc.cluster.local"
     r: redis.Redis = await redis.from_url(redis_host, port=redis_port, db=0, password=redis_password)
 
     while True:
         try:
-            with POLL_DURATION.time():
-                try:
-                    with INFLUX_DURATION.time():
-                        df_mav, df_last_vol, df_old_price, df_curr_price, df_float = await run_influx_queries(async_query_api)
-
-                    required_dfs = {
-                        "df_mav": df_mav,
-                        "df_last_vol": df_last_vol,
-                        "df_old_price": df_old_price,
-                        "df_curr_price": df_curr_price,
-                        "df_float": df_float,
-                    }
-
-                    empty_dfs = [name for name, df in required_dfs.items() if df.empty]
-                    if empty_dfs:
-                        logger.error(f"❌  One or more required DataFrames are empty: {', '.join(empty_dfs)}. Retrying in 30s.")
-                        await asyncio.sleep(30)
-                        continue
-
-                    if logger.isEnabledFor(logging.DEBUG):        
-                        logger.debug(f"10mav tickers: {df_mav['ticker'].nunique()}, Sample: {df_mav['ticker'].unique()[:5]}")
-                        logger.debug(f"volume tickers: {df_last_vol['ticker'].nunique()}, Sample: {df_last_vol['ticker'].unique()[:5]}")
-                        logger.debug(f"old_price tickers: {df_old_price['ticker'].nunique()}, Sample: {df_old_price['ticker'].unique()[:5]}")
-                        logger.debug(f"current_price tickers: {df_curr_price['ticker'].nunique()}, Sample: {df_curr_price['ticker'].unique()[:5]}")
-                        logger.debug(f"float tickers: {df_float['ticker'].nunique()}, Sample: {df_float['ticker'].unique()[:5]}")
-
-                    common_tickers = set(df_mav['ticker']) & set(df_last_vol['ticker']) & set(df_old_price['ticker']) & set(df_curr_price['ticker']) & set(df_float['ticker'])
-                    logger.info(f"🧪 Common tickers across all datasets: {len(common_tickers)}")
+            async with websockets.connect(uri, max_size=None, compression=None) as ws:
+                async for message in ws:
+                    await handle_message(r, message)
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}. Reconnecting...")
+            await asyncio.sleep(5)
 
 
-                    with MERGE_DURATION.time():
-                        df = df_mav.merge(df_last_vol, on="ticker") \
-                            .merge(df_old_price, on="ticker") \
-                            .merge(df_curr_price, on="ticker") \
-                            .merge(df_float, on="ticker")
+async def poll_influx(async_query_api):
+    async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
+    async_query_api = async_client.query_api()
 
-                except Exception:
-                    logger.exception("Merge failed")
-                    df = pd.DataFrame()
+    while True:
+        with INFLUX_DURATION.time():
+            try:
+                df_mav, df_old_price, df_float = await run_influx_queries(async_query_api)
+                set_ticker_index(df_mav)
+                set_ticker_index(df_old_price)
+                set_ticker_index(df_float)
 
-                # Calculate Delta
-                with DELT_MULT_DURATION.time():
-                    df["delta"] = ((df["current_price"] - df["old_price"]) / df["old_price"])
+                async with dataframes_rwlock.writer:
+                    dataframes["10mav"] = df_mav
+                    dataframes["old_price"] = df_old_price 
+                    dataframes["float"] = df_float 
 
-                    # Filter out incomplete or NaN data
-                    # df = df.dropna(subset=["10mav", "volume", "old_price", "current_price", "float"])
+            except Exception as e:
+                logger.error("Error updating dataframes: {e}")
+        
+        await asyncio.sleep(300)
 
-                    df["multiplier"] = df["volume"] / df["10mav"]
-
-
-
-                    
-                    logger.info(f"✅ Merged DataFrame with {len(df)} rows after filtering.")
-
-
-                with ALERT_DURATION.time():
-                    if not df.empty:
-                        tasks = [process_ticker(r, row, now) for _, row in df.iterrows()]
-                        await asyncio.gather(*tasks)
-        except Exception:
-            logger.exception("Polling iteration failed")
-        await asyncio.sleep(5)
+async def main():
+    ws_task = asyncio.create_task(listen_websocket())
+    influx_task = asyncio.create_task(poll_influx())
+    await asyncio.gather(ws_task, influx_task)
 
 
 if __name__ == "__main__":
     logger.info("Starting metric server")
     start_http_server(8000)
     logger.info("Starting poller loop")
-    asyncio.run(start_poll_loop())
+    asyncio.run(main())
