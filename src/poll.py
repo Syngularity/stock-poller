@@ -380,7 +380,7 @@ async def listen_websocket():
             await asyncio.sleep(5)
 
 
-async def poll_influx(async_query_api):
+async def poll_influx():
     async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
     async_query_api = async_client.query_api()
 
