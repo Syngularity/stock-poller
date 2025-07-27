@@ -388,9 +388,9 @@ async def poll_influx():
         with INFLUX_DURATION.time():
             try:
                 df_mav, df_old_price, df_float = await run_influx_queries(async_query_api)
-                set_ticker_index(df_mav)
-                set_ticker_index(df_old_price)
-                set_ticker_index(df_float)
+                await set_ticker_index(df_mav)
+                await set_ticker_index(df_old_price)
+                await set_ticker_index(df_float)
 
                 async with dataframes_rwlock.writer:
                     dataframes["10mav"] = df_mav
