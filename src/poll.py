@@ -367,7 +367,7 @@ async def handle_message(r, message):
 
 
 async def listen_websocket():
-    uri = "ws://ingestor-service.stock.svc.cluster.local"
+    uri = "ws://ingestor-service.stock.svc.cluster.local/ws"
     r: redis.Redis = await redis.from_url(redis_host, port=redis_port, db=0, password=redis_password)
 
     while True:
