@@ -365,7 +365,6 @@ async def handle_message(r, message):
 
     await process_ticker(r, now, ticker, current_price, old_price, volume, mav, float, delta, multiplier)
 
-    pass
 
 async def listen_websocket():
     uri = "ws://ingestor-service.stock.svc.cluster.local"
