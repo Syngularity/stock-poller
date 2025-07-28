@@ -8,7 +8,7 @@ import pytz
 import os
 import requests
 from influxdb_client.client.exceptions import InfluxDBError
-from prometheus_client import start_http_server, Summary
+from prometheus_client import start_http_server, Summary, Counter
 import redis.asyncio as redis
 import asyncio
 import websockets
@@ -29,6 +29,9 @@ NAMESPACE = 'stock_poller'
 def make_summary(name, documentation, **kwargs):
     return Summary(name, documentation, namespace=NAMESPACE, **kwargs)
 
+def make_counter(name, documentation, **kwargs):
+    return Counter(name, documentation, namespace=NAMESPACE, **kwargs)
+
 
 POLL_DURATION = make_summary('poll_duration_seconds', 'Poll duration in seconds')
 INFLUX_DURATION = make_summary('influx_duration_seconds', 'Influx duration in seconds')
@@ -37,6 +40,7 @@ MERGE_DURATION = make_summary('merge_duration_seconds', 'Merge duration in secon
 DELT_MULT_DURATION = make_summary('delt_mult_duration_seconds', 'delt mult duration in seconds')
 REDIS_DURATION = make_summary('redis_duration_seconds', 'redis duration in seconds')
 ALERT_DURATION = make_summary('alert_duration_seconds', 'alert duration in seconds')
+WEBSOCKET_DISCONNECT = make_counter('websocket_disconnect_total', 'The amount of times the websocket disconnected')
 
 alert_url = os.getenv("ALERT_HOST")
 url = os.getenv("INFLUX_URL")
@@ -347,6 +351,9 @@ async def lookup(df: pd.DataFrame, ticker):
 async def handle_message(r, message):
     ticker, current_price, volume = parse_ws_message(message)
 
+    if current_price < 1 or current_price > 20:
+        return
+
     # Need reader lock because these dataframes are updating in the bg
     async with dataframes_rwlock.reader:
         mav = await lookup(dataframes["10mav"], ticker)
@@ -377,6 +384,7 @@ async def listen_websocket():
                     await handle_message(r, message)
         except Exception as e:
             logger.error(f"Unexpected error: {e}. Reconnecting...")
+            WEBSOCKET_DISCONNECT.inc()
             await asyncio.sleep(5)
 
 
