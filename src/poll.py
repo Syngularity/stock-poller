@@ -331,7 +331,8 @@ async def process_ticker(r: redis.Redis, now, ticker, cp, op, v, mav, float, del
             f"Failed processing ticker '{ticker}': {type(e).__name__}: {str(e)}"
         )
 
-def parse_ws_message(message: bytes) -> tuple:
+def parse_ws_message(message) -> tuple:
+    logger.info(message)
     data = orjson.loads(message)
     return (
         data.get('sym'),      # symbol
@@ -349,28 +350,32 @@ async def lookup(df: pd.DataFrame, ticker):
 
 
 async def handle_message(r, message):
-    ticker, current_price, volume = parse_ws_message(message)
+    try:
+        ticker, current_price, volume = parse_ws_message(message)
 
-    if current_price < 1 or current_price > 20:
-        return
+        if current_price < 1 or current_price > 20:
+            return
 
-    # Need reader lock because these dataframes are updating in the bg
-    async with dataframes_rwlock.reader:
-        mav = await lookup(dataframes["10mav"], ticker)
-        old_price = await lookup(dataframes["old_price"], ticker)
-        float = await lookup(dataframes["float"], ticker)
+        # Need reader lock because these dataframes are updating in the bg
+        async with dataframes_rwlock.reader:
+            mav = await lookup(dataframes["10mav"], ticker)
+            old_price = await lookup(dataframes["old_price"], ticker)
+            float = await lookup(dataframes["float"], ticker)
 
-    if mav is None or old_price is None or float is None:
-        # Do not process ticker if it's missing data
-        # Could turn on debug logging here
-        return
+        if mav is None or old_price is None or float is None:
+            # Do not process ticker if it's missing data
+            # Could turn on debug logging here
+            return
 
-    delta = ((current_price - old_price) / old_price)
-    multiplier = volume / mav
+        delta = ((current_price - old_price) / old_price)
+        multiplier = volume / mav
 
-    now = datetime.now(pytz.timezone("US/Eastern")).isoformat()
+        now = datetime.now(pytz.timezone("US/Eastern")).isoformat()
 
-    await process_ticker(r, now, ticker, current_price, old_price, volume, mav, float, delta, multiplier)
+        await process_ticker(r, now, ticker, current_price, old_price, volume, mav, float, delta, multiplier)
+    except Exception as e:
+        logger.error(f"Unexpected error processing ticker: {e}")
+
 
 
 async def listen_websocket():
