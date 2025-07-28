@@ -338,7 +338,7 @@ def parse_ws_message(message) -> tuple:
     return (
         data.get('sym'),      # symbol
         data.get('c'),        # close  
-        data.get('av'),        # volume
+        data.get('av'),       # volume
     )
 
 async def lookup(table: Dict[str, Dict], key, ticker):
@@ -346,10 +346,8 @@ async def lookup(table: Dict[str, Dict], key, ticker):
         logger.info(f"No dataframe loaded when looking at ticker {ticker}")
         return None
     try:
-        logger.info(f"Getting indexed result for ticker {ticker} {table} {key}")
         return table[ticker][key]
     except KeyError:
-        logger.info(f"Missing key in table {ticker} {table} {key}")
         return None
 
 
@@ -358,7 +356,7 @@ async def handle_message(r, message):
         with TICKER_PROCESS_DURATION.time():
             ticker, current_price, volume = parse_ws_message(message)
 
-            if current_price < 1 or current_price > 20:
+            if current_price < 1 or current_price > 20 or volume < 100_000:
                 return
 
             # Need reader lock because these dataframes are updating in the bg
@@ -375,6 +373,9 @@ async def handle_message(r, message):
 
             delta = ((current_price - old_price) / old_price)
             multiplier = volume / mav
+
+            if multiplier < 1:
+                return
 
             now = datetime.now(pytz.timezone("US/Eastern")).isoformat()
 
