@@ -399,34 +399,36 @@ async def listen_websocket():
             WEBSOCKET_DISCONNECT.inc()
             await asyncio.sleep(5)
 
+async def run_influx_queries(async_query_api):
+    with INFLUX_DURATION.time():
+        try:
+            df_mav, df_old_price, df_float = await run_influx_queries(async_query_api)
+            mav_dict = await set_ticker_index(df_mav)
+            old_price_dict = await set_ticker_index(df_old_price)
+            float_dict = await set_ticker_index(df_float)
 
-async def poll_influx():
-    async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
-    async_query_api = async_client.query_api()
+            async with dataframes_rwlock.writer:
+                dataframes["10mav"] = mav_dict
+                dataframes["old_price"] = old_price_dict
+                dataframes["float"] = float_dict
 
+        except Exception as e:
+            logger.error("Error updating dataframes: {e}")
+
+
+async def poll_influx(async_query_api):
     while True:
-        with INFLUX_DURATION.time():
-            try:
-                df_mav, df_old_price, df_float = await run_influx_queries(async_query_api)
-                mav_dict = await set_ticker_index(df_mav)
-                old_price_dict = await set_ticker_index(df_old_price)
-                float_dict = await set_ticker_index(df_float)
-
-                async with dataframes_rwlock.writer:
-                    dataframes["10mav"] = mav_dict
-                    dataframes["old_price"] = old_price_dict
-                    dataframes["float"] = float_dict
-
-            except Exception as e:
-                logger.error("Error updating dataframes: {e}")
-        
+        run_influx_queries(async_query_api)
         await asyncio.sleep(300)
 
 async def main():
-    await poll_influx() # Do it first to avoid race conditions
+    async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
+    async_query_api = async_client.query_api()
+    await run_influx_queries(async_query_api) # Do it first to avoid race conditions
     logger.info("Loaded data from influx, starting tasks...")
+
     ws_task = asyncio.create_task(listen_websocket())
-    influx_task = asyncio.create_task(poll_influx())
+    influx_task = asyncio.create_task(poll_influx(async_query_api))
     await asyncio.gather(ws_task, influx_task)
 
 
