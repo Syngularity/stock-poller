@@ -399,7 +399,7 @@ async def listen_websocket():
             WEBSOCKET_DISCONNECT.inc()
             await asyncio.sleep(5)
 
-async def run_influx_queries(async_query_api):
+async def load_data_from_influx(async_query_api):
     with INFLUX_DURATION.time():
         try:
             df_mav, df_old_price, df_float = await run_influx_queries(async_query_api)
@@ -413,18 +413,18 @@ async def run_influx_queries(async_query_api):
                 dataframes["float"] = float_dict
 
         except Exception as e:
-            logger.error("Error updating dataframes: {e}")
+            logger.error(f"Error updating dataframes: {e}")
 
 
 async def poll_influx(async_query_api):
     while True:
-        run_influx_queries(async_query_api)
+        await load_data_from_influx(async_query_api)
         await asyncio.sleep(300)
 
 async def main():
     async_client = InfluxDBClientAsync(url=url, token=token, org=org, enable_gzip=True)
     async_query_api = async_client.query_api()
-    await run_influx_queries(async_query_api) # Do it first to avoid race conditions
+    await load_data_from_influx(async_query_api) # Do it first to avoid race conditions
     logger.info("Loaded data from influx, starting tasks...")
 
     ws_task = asyncio.create_task(listen_websocket())
