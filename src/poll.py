@@ -336,7 +336,7 @@ def parse_ws_message(message: bytes) -> tuple:
     return (
         data.get('sym'),      # symbol
         data.get('c'),        # close  
-        data.get('v'),        # volume
+        data.get('av'),        # volume
     )
 
 async def lookup(df: pd.DataFrame, ticker):
