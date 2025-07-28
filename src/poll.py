@@ -373,7 +373,7 @@ async def handle_message(r, message):
 
         await process_ticker(r, now, ticker, current_price, old_price, volume, mav, float, delta, multiplier)
     except Exception as e:
-        logger.error(f"Unexpected error processing ticker: {e}")
+        logger.error(f"Unexpected error processing ticker: {e}\nFor: {message}")
 
 
 
