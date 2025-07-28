@@ -349,6 +349,7 @@ async def lookup(table: Dict[str, Dict], key, ticker):
         logger.info(f"Getting indexed result for ticker {ticker} {table} {key}")
         return table[ticker][key]
     except KeyError:
+        logger.info(f"Missing key in table {ticker} {table} {key}")
         return None
 
 
