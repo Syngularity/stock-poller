@@ -47,6 +47,7 @@ TICKERS_RECIEVED = make_counter('tickers_recieved_total', 'The amount of tickers
 TICKERS_PROCESSED = make_counter('tickers_processed_total', 'The amount of tickers processed')
 TICKERS_FAILED = make_counter('tickers_failed_total', 'The amount of tickers that failed to process')
 TICKERS_PROCESSED_HIST = make_histogram('tickers_processed_seconds', 'A histogramt of the ticker processing time')
+TICKERS_MISSING_DATA = make_counter('tickers_missing_data', 'A count of the data a ticker is missing', labelname=["missing_fields"])
 
 alert_url = os.getenv("ALERT_HOST")
 url = os.getenv("INFLUX_URL")
@@ -371,10 +372,18 @@ async def handle_message(r, message):
                 old_price = await lookup(dataframes["old_price"], "old_price", ticker)
                 float = await lookup(dataframes["float"], "float", ticker)
 
-            if mav is None or old_price is None or float is None:
-                # Do not process ticker if it's missing data
-                # Could turn on debug logging here
-                logger.info(f"coudn't process ticker {ticker} cuz empty mav=={mav} op=={old_price} float=={float}")
+            if mav is None:
+                TICKERS_MISSING_DATA.labels(missing_field="mav").inc()
+                TICKERS_FAILED.inc()
+                return
+
+            if old_price is None:
+                TICKERS_MISSING_DATA.labels(missing_field="old_price").inc()
+                TICKERS_FAILED.inc()
+                return
+
+            if float is None:
+                TICKERS_MISSING_DATA.labels(missing_field="float").inc()
                 TICKERS_FAILED.inc()
                 return
 
