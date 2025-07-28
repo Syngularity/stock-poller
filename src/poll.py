@@ -424,6 +424,7 @@ async def poll_influx():
 
 async def main():
     await poll_influx() # Do it first to avoid race conditions
+    logger.info("Loaded data from influx, starting tasks...")
     ws_task = asyncio.create_task(listen_websocket())
     influx_task = asyncio.create_task(poll_influx())
     await asyncio.gather(ws_task, influx_task)
