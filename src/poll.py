@@ -47,7 +47,7 @@ TICKERS_RECIEVED = make_counter('tickers_recieved_total', 'The amount of tickers
 TICKERS_PROCESSED = make_counter('tickers_processed_total', 'The amount of tickers processed')
 TICKERS_FAILED = make_counter('tickers_failed_total', 'The amount of tickers that failed to process')
 TICKERS_PROCESSED_HIST = make_histogram('tickers_processed_seconds', 'A histogramt of the ticker processing time')
-TICKERS_MISSING_DATA = make_counter('tickers_missing_data', 'A count of the data a ticker is missing', labelname=["missing_fields"])
+TICKERS_MISSING_DATA = make_counter('tickers_missing_data', 'A count of the data a ticker is missing', labelnames=["missing_fields"])
 
 alert_url = os.getenv("ALERT_HOST")
 url = os.getenv("INFLUX_URL")
