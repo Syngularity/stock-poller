@@ -368,7 +368,7 @@ async def handle_message(r, message):
             if mav is None or old_price is None or float is None:
                 # Do not process ticker if it's missing data
                 # Could turn on debug logging here
-                logger.info("coudn't process ticker cuz empty mav=={mav} op=={old_price} float=={float}")
+                logger.info(f"coudn't process ticker {ticker} cuz empty mav=={mav} op=={old_price} float=={float}")
                 return
 
             delta = ((current_price - old_price) / old_price)
