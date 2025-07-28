@@ -41,6 +41,8 @@ DELT_MULT_DURATION = make_summary('delt_mult_duration_seconds', 'delt mult durat
 REDIS_DURATION = make_summary('redis_duration_seconds', 'redis duration in seconds')
 ALERT_DURATION = make_summary('alert_duration_seconds', 'alert duration in seconds')
 WEBSOCKET_DISCONNECT = make_counter('websocket_disconnect_total', 'The amount of times the websocket disconnected')
+TICKERS_PROCESSED = make_counter('tickers_processed_total', 'The amount of tickers processed')
+TICKER_PROCESS_DURATION = make_summary('ticker_process_seconds', 'The amount of time it takes to process a ticker on average')
 
 alert_url = os.getenv("ALERT_HOST")
 url = os.getenv("INFLUX_URL")
@@ -350,28 +352,30 @@ async def lookup(df: pd.DataFrame, ticker):
 
 async def handle_message(r, message):
     try:
-        ticker, current_price, volume = parse_ws_message(message)
+        with TICKER_PROCESS_DURATION.time():
+            ticker, current_price, volume = parse_ws_message(message)
 
-        if current_price < 1 or current_price > 20:
-            return
+            if current_price < 1 or current_price > 20:
+                return
 
-        # Need reader lock because these dataframes are updating in the bg
-        async with dataframes_rwlock.reader:
-            mav = await lookup(dataframes["10mav"], ticker)
-            old_price = await lookup(dataframes["old_price"], ticker)
-            float = await lookup(dataframes["float"], ticker)
+            # Need reader lock because these dataframes are updating in the bg
+            async with dataframes_rwlock.reader:
+                mav = await lookup(dataframes["10mav"], ticker)
+                old_price = await lookup(dataframes["old_price"], ticker)
+                float = await lookup(dataframes["float"], ticker)
 
-        if mav is None or old_price is None or float is None:
-            # Do not process ticker if it's missing data
-            # Could turn on debug logging here
-            return
+            if mav is None or old_price is None or float is None:
+                # Do not process ticker if it's missing data
+                # Could turn on debug logging here
+                return
 
-        delta = ((current_price - old_price) / old_price)
-        multiplier = volume / mav
+            delta = ((current_price - old_price) / old_price)
+            multiplier = volume / mav
 
-        now = datetime.now(pytz.timezone("US/Eastern")).isoformat()
+            now = datetime.now(pytz.timezone("US/Eastern")).isoformat()
 
-        await process_ticker(r, now, ticker, current_price, old_price, volume, mav, float, delta, multiplier)
+            await process_ticker(r, now, ticker, current_price, old_price, volume, mav, float, delta, multiplier)
+            TICKERS_PROCESSED.inc()
     except Exception as e:
         logger.error(f"Unexpected error processing ticker: {e}\nFor: {message}")
 
