@@ -245,8 +245,7 @@ async def run_influx_queries(async_query_api: QueryApiAsync):
     )
 
 async def set_ticker_index(df: pd.DataFrame):
-    if df.index.name != "ticker":
-        df.set_index("ticker")
+    return df.set_index("ticker").to_dict("index")
 
 async def process_ticker(r: redis.Redis, now, ticker, cp, op, v, mav, float, delta, multiplier):
     try:
@@ -342,13 +341,13 @@ def parse_ws_message(message) -> tuple:
         data.get('av'),        # volume
     )
 
-async def lookup(df: pd.DataFrame, ticker):
-    if df is None:
+async def lookup(table: Dict[str, Dict], key, ticker):
+    if table is None:
         logger.info(f"No dataframe loaded when looking at ticker {ticker}")
         return None
     try:
-        logger.info(f"Getting indexed result for ticker {ticker}")
-        return df.loc[ticker]
+        logger.info(f"Getting indexed result for ticker {ticker} {table} {key}")
+        return table[ticker][key]
     except KeyError:
         return None
 
@@ -363,9 +362,9 @@ async def handle_message(r, message):
 
             # Need reader lock because these dataframes are updating in the bg
             async with dataframes_rwlock.reader:
-                mav = await lookup(dataframes["10mav"], ticker)
-                old_price = await lookup(dataframes["old_price"], ticker)
-                float = await lookup(dataframes["float"], ticker)
+                mav = await lookup(dataframes["10mav"], "10mav", ticker)
+                old_price = await lookup(dataframes["old_price"], "old_price", ticker)
+                float = await lookup(dataframes["float"], "float", ticker)
 
             if mav is None or old_price is None or float is None:
                 # Do not process ticker if it's missing data
@@ -408,14 +407,14 @@ async def poll_influx():
         with INFLUX_DURATION.time():
             try:
                 df_mav, df_old_price, df_float = await run_influx_queries(async_query_api)
-                await set_ticker_index(df_mav)
-                await set_ticker_index(df_old_price)
-                await set_ticker_index(df_float)
+                mav_dict = await set_ticker_index(df_mav)
+                old_price_dict = await set_ticker_index(df_old_price)
+                float_dict = await set_ticker_index(df_float)
 
                 async with dataframes_rwlock.writer:
-                    dataframes["10mav"] = df_mav
-                    dataframes["old_price"] = df_old_price 
-                    dataframes["float"] = df_float 
+                    dataframes["10mav"] = mav_dict
+                    dataframes["old_price"] = old_price_dict
+                    dataframes["float"] = float_dict
 
             except Exception as e:
                 logger.error("Error updating dataframes: {e}")
@@ -423,6 +422,7 @@ async def poll_influx():
         await asyncio.sleep(300)
 
 async def main():
+    await poll_influx() # Do it first to avoid race conditions
     ws_task = asyncio.create_task(listen_websocket())
     influx_task = asyncio.create_task(poll_influx())
     await asyncio.gather(ws_task, influx_task)
