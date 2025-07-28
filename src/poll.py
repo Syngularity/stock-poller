@@ -335,6 +335,7 @@ async def process_ticker(r: redis.Redis, now, ticker, cp, op, v, mav, float, del
 
 def parse_ws_message(message) -> tuple:
     data = orjson.loads(message)
+    logger.info(message)
     return (
         data.get('sym'),      # symbol
         data.get('c'),        # close  
@@ -367,6 +368,7 @@ async def handle_message(r, message):
             if mav is None or old_price is None or float is None:
                 # Do not process ticker if it's missing data
                 # Could turn on debug logging here
+                logger.info("coudn't process ticker cuz empty mav=={mav} op=={old_price} float=={float}")
                 return
 
             delta = ((current_price - old_price) / old_price)
