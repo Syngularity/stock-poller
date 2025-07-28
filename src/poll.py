@@ -8,7 +8,7 @@ import pytz
 import os
 import requests
 from influxdb_client.client.exceptions import InfluxDBError
-from prometheus_client import start_http_server, Summary, Counter
+from prometheus_client import start_http_server, Summary, Counter, Histogram
 import redis.asyncio as redis
 import asyncio
 import websockets
@@ -32,6 +32,8 @@ def make_summary(name, documentation, **kwargs):
 def make_counter(name, documentation, **kwargs):
     return Counter(name, documentation, namespace=NAMESPACE, **kwargs)
 
+def make_histogram(name, documentation, **kwargs):
+    return Histogram(name, documentation, namespace=NAMESPACE, buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5], **kwargs)
 
 POLL_DURATION = make_summary('poll_duration_seconds', 'Poll duration in seconds')
 INFLUX_DURATION = make_summary('influx_duration_seconds', 'Influx duration in seconds')
@@ -41,8 +43,10 @@ DELT_MULT_DURATION = make_summary('delt_mult_duration_seconds', 'delt mult durat
 REDIS_DURATION = make_summary('redis_duration_seconds', 'redis duration in seconds')
 ALERT_DURATION = make_summary('alert_duration_seconds', 'alert duration in seconds')
 WEBSOCKET_DISCONNECT = make_counter('websocket_disconnect_total', 'The amount of times the websocket disconnected')
+TICKERS_RECIEVED = make_counter('tickers_recieved_total', 'The amount of tickers recieved')
 TICKERS_PROCESSED = make_counter('tickers_processed_total', 'The amount of tickers processed')
-TICKER_PROCESS_DURATION = make_summary('ticker_process_seconds', 'The amount of time it takes to process a ticker on average')
+TICKERS_FAILED = make_counter('tickers_failed_total', 'The amount of tickers that failed to process')
+TICKERS_PROCESSED_HIST = make_histogram('tickers_processed_seconds', 'A histogramt of the ticker processing time')
 
 alert_url = os.getenv("ALERT_HOST")
 url = os.getenv("INFLUX_URL")
@@ -328,13 +332,13 @@ async def process_ticker(r: redis.Redis, now, ticker, cp, op, v, mav, float, del
 
 
     except Exception as e:
+        TICKERS_FAILED.inc()
         logger.exception(
             f"Failed processing ticker '{ticker}': {type(e).__name__}: {str(e)}"
         )
 
 def parse_ws_message(message) -> tuple:
     data = orjson.loads(message)
-    logger.info(message)
     return (
         data.get('sym'),      # symbol
         data.get('c'),        # close  
@@ -348,12 +352,14 @@ async def lookup(table: Dict[str, Dict], key, ticker):
     try:
         return table[ticker][key]
     except KeyError:
+        logger.info(f"Key error in dataframe for ticker {ticker}")
         return None
 
 
 async def handle_message(r, message):
+    TICKERS_RECIEVED.inc()
     try:
-        with TICKER_PROCESS_DURATION.time():
+        with TICKERS_PROCESSED_HIST.time():
             ticker, current_price, volume = parse_ws_message(message)
 
             if current_price < 1 or current_price > 20 or volume < 100_000:
@@ -369,6 +375,7 @@ async def handle_message(r, message):
                 # Do not process ticker if it's missing data
                 # Could turn on debug logging here
                 logger.info(f"coudn't process ticker {ticker} cuz empty mav=={mav} op=={old_price} float=={float}")
+                TICKERS_FAILED.inc()
                 return
 
             delta = ((current_price - old_price) / old_price)
@@ -382,6 +389,7 @@ async def handle_message(r, message):
             await process_ticker(r, now, ticker, current_price, old_price, volume, mav, float, delta, multiplier)
             TICKERS_PROCESSED.inc()
     except Exception as e:
+        TICKERS_FAILED.inc()
         logger.error(f"Unexpected error processing ticker: {e}\nFor: {message}")
 
 
