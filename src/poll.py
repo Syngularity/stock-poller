@@ -344,8 +344,10 @@ def parse_ws_message(message) -> tuple:
 
 async def lookup(df: pd.DataFrame, ticker):
     if df is None:
+        logger.info(f"No dataframe loaded when looking at ticker {ticker}")
         return None
     try:
+        logger.info(f"Getting indexed result for ticker {ticker}")
         return df.loc[ticker]
     except KeyError:
         return None
