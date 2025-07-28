@@ -348,12 +348,10 @@ def parse_ws_message(message) -> tuple:
 
 async def lookup(table: Dict[str, Dict], key, ticker):
     if table is None:
-        logger.info(f"No dataframe loaded when looking at ticker {ticker}")
         return None
     try:
         return table[ticker][key]
     except KeyError:
-        logger.info(f"Key error in dataframe for ticker {ticker}")
         return None
 
 
