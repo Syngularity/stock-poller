@@ -289,9 +289,9 @@ async def process_ticker(r: redis.Redis, now, ticker, cp, op, v, mav, float, del
 
         if payload['volume'] > 100000 and payload["multiplier"] > 1:
 
-            minutes_open = get_minutes_since_open(now)
+            minutes_open = get_minutes_since_open()
 
-            phase, base_threshold = volume_threshold_by_time(minutes_since_open=get_minutes_since_open(now))
+            phase, base_threshold = volume_threshold_by_time(minutes_since_open=get_minutes_since_open())
             _, mav10_threshold = mav10_threshold_by_time(minutes_open)
 
             vol_float_ratio = payload['volume']/payload['float']
