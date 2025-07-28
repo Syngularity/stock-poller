@@ -332,7 +332,6 @@ async def process_ticker(r: redis.Redis, now, ticker, cp, op, v, mav, float, del
         )
 
 def parse_ws_message(message) -> tuple:
-    logger.info(message)
     data = orjson.loads(message)
     return (
         data.get('sym'),      # symbol
