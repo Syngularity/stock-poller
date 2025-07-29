@@ -383,7 +383,7 @@ async def handle_message(r, message):
             if float is None:
                 TICKERS_MISSING_DATA.labels(missing_field="float").inc()
                 TICKERS_FAILED.inc()
-                return
+                float = 0
 
             delta = ((current_price - old_price) / old_price)
             multiplier = volume / mav
