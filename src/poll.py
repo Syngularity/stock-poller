@@ -86,6 +86,7 @@ ALERT_TIERS_THRESHOLDS = [
     ("HIGH", 10),
     ("MEDIUM", 3),
     ("LOW", 1),
+    ("UNKNOWN FLOAT", 0),
 ]
 
 TIER_PRIORITY = {
@@ -299,7 +300,9 @@ async def process_ticker(r: redis.Redis, now, ticker, cp, op, v, mav, float, del
             phase, base_threshold = volume_threshold_by_time(minutes_since_open=get_minutes_since_open())
             _, mav10_threshold = mav10_threshold_by_time(minutes_open)
 
-            vol_float_ratio = payload['volume']/payload['float']
+
+            # If float is zero, set the ratio to zero. We may be missing float, but the stock might still be relevant to trade.
+            vol_float_ratio = 0 if payload['float'] == 0 else  payload['volume'] / payload['float']
         
             
             if payload["multiplier"] < mav10_threshold:
